@@ -26,13 +26,13 @@ export const JUMPER = {
 };
 
 export const PHYSICS = {
-  chargeSpeed: 0.002,   // power accumulated per frame  (×0.25 baseline)
-  jumpSpeedX: 0.03,     // horizontal speed multiplier
-  jumpSpeedY: 0.085,    // +25%
-  gravity: 0.00375,     // +25%
-  compressSpeed: 0.0056, // +25%
-  releaseSpeed: 0.103,   // +25%
-  fallSpeed: 0.103,      // +25%
+  chargeSpeed: 0.002,   // power accumulated per frame
+  jumpSpeedX: 0.0375,   // +25%
+  jumpSpeedY: 0.17,      // +100%
+  gravity: 0.0075,       // +100%
+  compressSpeed: 0.0112, // +100%
+  releaseSpeed: 0.206,   // +100%
+  fallSpeed: 0.206,      // +100%
   rotateSpeed: 0.08,    // rotation speed (unchanged)
 };
 

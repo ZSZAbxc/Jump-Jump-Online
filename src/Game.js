@@ -353,8 +353,8 @@ export class Game {
   _onRelease() {
     if (this._dead || this._finished || this._respawnTimer > 0) return;
     if (this.state !== GAME_STATES.CHARGING) return;
-    this._jumpVelX = this._chargePower * 0.7;
-    this._jumpVelY = PHYSICS.jumpSpeedY + this._chargePower * 1.3;
+    this._jumpVelX = this._chargePower * 0.875;
+    this._jumpVelY = PHYSICS.jumpSpeedY + this._chargePower * 2.6;
     this._hasLaunched = false;
     this.state = GAME_STATES.JUMPING;
     this._chargePower = 0;
