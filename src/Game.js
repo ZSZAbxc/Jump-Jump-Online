@@ -31,18 +31,18 @@ export class Game {
 
     this._transitionSteps = 0;
 
-    // UI throttle
     this._myColorHex = '#232323';
     this._serverTime = 0;
     this._serverClockOffset = 0;
     this._timeEndMs = 0;
 
     this._syncTimer = 0;
-    this._syncInterval = 0.066;
     this._texSynced = false;
     this._texDataURL = null;
-    this._frameAccum = 0;
-    this._lastFrameTime = 0;
+
+    // Fixed timestep: run at most N physics ticks per frame
+    this._physAccum = 0;
+    this._physStep = 1 / 60;
 
     // Mode
     this._mode = 'race';
@@ -53,7 +53,7 @@ export class Game {
     this._timeRunning = false;
 
     // Track all players for leaderboard / race bar
-    this._remotePlayers = new Map(); // id → { name, color, score, texURL }
+    this._remotePlayers = new Map();
     this._myName = '玩家';
 
     input.onChargeStart(() => this._onPress());
@@ -75,23 +75,16 @@ export class Game {
     this._serverClockOffset = Date.now() - serverTime;
   }
 
-  setMyName(name) {
-    this._myName = name;
-  }
-
-  setMyColorHex(hex) {
-    this._myColorHex = hex;
-  }
+  setMyName(name) { this._myName = name; }
+  setMyColorHex(hex) { this._myColorHex = hex; }
 
   restoreReconnectState(data) {
-    // Stop current loop, reload everything from server snapshot
     this.ui.hideGameOver();
     this.ui.hideGameInfo();
     this.world.loadSharedCubes(data.cubes, data.dirs, data.mode, data.modeParam, data.faceAssignments, data.playerFaces);
     this.setMode(data.mode, data.modeParam);
     this.setServerTime(data.serverTime);
 
-    // Remove all old remotes, rebuild from player list
     for (const [id] of this.world.remotes) this.world.removeRemote(id);
     this._remotePlayers.clear();
 
@@ -127,31 +120,25 @@ export class Game {
     this._transitionSteps = 0;
     this._respawnTimer = 0;
     this._fallEnded = false;
-    this._texSynced = false; // re-send texture on reconnect
+    this._texSynced = false;
     this.state = GAME_STATES.IDLE;
     this.input.enable();
     this.ui.updateScore(this.score);
 
     if (this._mode === 'race') {
-      this.ui.showRaceBar();
-      this.ui.hideTimedLeaderboard();
+      this.ui.showRaceBar(); this.ui.hideTimedLeaderboard();
       this.ui.showGameInfo(`🏁 终点第 ${this._modeParam} 格`);
     } else {
       this._timeEndMs = this._serverTime + this._modeParam * 1000;
       this._timeRunning = true;
-      this.ui.hideRaceBar();
-      this.ui.showTimedLeaderboard();
+      this.ui.hideRaceBar(); this.ui.showTimedLeaderboard();
       this.ui.showGameInfo(`⏱ ${this._modeParam}s`);
     }
     this.ui.showRelativeBar();
 
-    // Re-register self texture for cube faces after reconnect
     if (this._texDataURL) this.world.setSelfFaceTex(this._texDataURL);
 
-    if (!this._running) {
-      this._running = true;
-      this._loop();
-    }
+    if (!this._running) { this._running = true; this._loop(); }
   }
 
   start() {
@@ -171,24 +158,16 @@ export class Game {
 
     if (this._mode === 'race') {
       this.ui.showGameInfo(`🏁 终点第 ${this._modeParam} 格`);
-      this.ui.showRaceBar();
-      this.ui.hideTimedLeaderboard();
+      this.ui.showRaceBar(); this.ui.hideTimedLeaderboard();
     } else {
-      // Use server clock for fairness
       this._timeEndMs = this._serverTime + this._modeParam * 1000;
       this._timeRunning = true;
       this.ui.showGameInfo(`⏱ ${this._modeParam}s`);
-      this.ui.hideRaceBar();
-      this.ui.showTimedLeaderboard();
+      this.ui.hideRaceBar(); this.ui.showTimedLeaderboard();
     }
     this.ui.showRelativeBar();
-    // latency shown globally in main.js
 
-    if (!this._running) {
-      this._running = true;
-      this._loop();
-    }
-    // Sync initial idx
+    if (!this._running) { this._running = true; this._loop(); }
     this.network?.sendIdx(0);
   }
 
@@ -199,9 +178,7 @@ export class Game {
     this.ui.hideTimedLeaderboard();
     this.ui.hideRelativeBar();
 
-    for (const [id] of this.world.remotes) {
-      this.world.removeRemote(id);
-    }
+    for (const [id] of this.world.remotes) this.world.removeRemote(id);
     this._remotePlayers.clear();
 
     if (!this.world.jumper) this.world.init();
@@ -244,58 +221,48 @@ export class Game {
    *  MAIN LOOP
    * ================================================================ */
 
-  _loop(now) {
-    requestAnimationFrame((t) => this._loop(t));
+  _loop() {
+    requestAnimationFrame(() => this._loop());
 
-    // Real delta time (seconds)
-    const realDt = this._lastFrameTime ? Math.min(0.05, (now - this._lastFrameTime) / 1000) : 1 / 60;
-    this._lastFrameTime = now;
+    // Fixed timestep: run at most 60 physics ticks per second
+    const now = performance.now();
+    const frameDelta = this._lastPhysTime ? (now - this._lastPhysTime) / 1000 : this._physStep;
+    this._lastPhysTime = now;
+    this._physAccum += Math.min(frameDelta, 0.05);
 
-    // Fixed 60Hz physics — accumulate real time, fire at most 60 times/sec
-    this._frameAccum += realDt;
-    if (this._frameAccum < 1 / 60) {
-      this.renderer.render();
-      return;
-    }
-    this._frameAccum -= 1 / 60;
+    // Run physics up to once per frame (60Hz cap on 120Hz screens)
+    if (this._physAccum >= this._physStep) {
+      this._physAccum -= this._physStep;
+      if (this._physAccum > this._physStep) this._physAccum = this._physStep; // drain excess
 
-    // Timed countdown (synced to server clock)
-    if (this._timeRunning) {
-      const serverNow = Date.now() - this._serverClockOffset;
-      const remaining = Math.max(0, (this._timeEndMs - serverNow) / 1000);
-      this.ui.updateGameInfo(`⏱ ${Math.ceil(remaining)}s` +
-        (this.score ? ` — ${this.score}分` : ''));
-      if (remaining <= 0) {
-        this._timeRunning = false;
-        this.input.disable();
-        this.network?.sendTimeUp(this.score);
-        this._finished = true;
+      // Timed countdown
+      if (this._timeRunning) {
+        const serverNow = Date.now() - this._serverClockOffset;
+        const remaining = Math.max(0, (this._timeEndMs - serverNow) / 1000);
+        this.ui.updateGameInfo(`⏱ ${Math.ceil(remaining)}s` +
+          (this.score ? ` — ${this.score}分` : ''));
+        if (remaining <= 0) {
+          this._timeRunning = false; this.input.disable();
+          this.network?.sendTimeUp(this.score);
+          this._finished = true; return;
+        }
+      }
+
+      // Respawn timer
+      if (this._respawnTimer > 0) {
+        this._respawnTimer -= 1 / 60;
+        if (this._respawnTimer <= 0) { this._respawnTimer = 0; this._doRespawn(); }
+        this.cameraCtrl.updateTarget(this.world.cubes, this.world.currentIdx);
+        this.cameraCtrl.update();
+        this.world.lerpRemotes(1 / 60);
+        this.renderer.render();
         return;
       }
+
+      this._update();
     }
 
-    // Run physics at 60Hz max — skip frames above 60fps
-    if (this._frameAccum < 1 / 60) {
-      this.renderer.render();
-      return;
-    }
-    this._frameAccum -= 1 / 60;
-
-    // Respawn timer
-    if (this._respawnTimer > 0) {
-      this._respawnTimer -= 1 / 60;
-      if (this._respawnTimer <= 0) {
-        this._respawnTimer = 0;
-        this._doRespawn();
-      }
-      this.cameraCtrl.updateTarget(this.world.cubes, this.world.currentIdx);
-      this.cameraCtrl.update();
-      this.world.lerpRemotes(1 / 60);
-      this.renderer.render();
-      return;
-    }
-
-    this._update();
+    // Always run visual passes — camera, fades, render
     this.cameraCtrl.updateTarget(this.world.cubes, this.world.currentIdx);
     this.cameraCtrl.update();
     this.world.updateFades();
@@ -320,7 +287,7 @@ export class Game {
     if (this._dead || this._finished) return;
     if (!this.network || !this.network.roomId) return;
     this._syncTimer += 0.016;
-    if (this._syncTimer < 0.033) return; // constant 30Hz
+    if (this._syncTimer < 0.033) return;
     this._syncTimer = 0;
 
     const j = this.world.jumper;
@@ -370,9 +337,7 @@ export class Game {
     return list;
   }
 
-  removeRemote(id) {
-    this.world.removeRemote(id);
-  }
+  removeRemote(id) { this.world.removeRemote(id); }
 
   /* ================================================================
    *  INPUT
@@ -388,7 +353,6 @@ export class Game {
   _onRelease() {
     if (this._dead || this._finished || this._respawnTimer > 0) return;
     if (this.state !== GAME_STATES.CHARGING) return;
-    // Bouncy launch: power scales both horizontal distance and arc height
     this._jumpVelX = this._chargePower * 0.7;
     this._jumpVelY = PHYSICS.jumpSpeedY + this._chargePower * 1.3;
     this._hasLaunched = false;
@@ -404,7 +368,6 @@ export class Game {
   _updateCharging() {
     const j = this.world.jumper;
     if (j.scale.y > 0.02) {
-      // Squash accelerates the longer you hold — feels springy
       const squashRate = PHYSICS.compressSpeed + this._chargePower * 0.03;
       j.scale.y -= squashRate;
       this._chargePower += PHYSICS.chargeSpeed;
@@ -412,9 +375,8 @@ export class Game {
   }
 
   _updateJumping() {
-    const j   = this.world.jumper;
+    const j = this.world.jumper;
     const dir = this.world.currentDir;
-
     const { velY } = Physics.jumpTrajectory(j.position, this._jumpVelX, this._jumpVelY, dir);
     this._jumpVelY = velY;
     if (j.scale.y < 1) j.scale.y = Math.min(1, j.scale.y + PHYSICS.releaseSpeed);
@@ -435,48 +397,31 @@ export class Game {
 
     if (result.location >= 1) {
       const steps = result.location;
-
-      // Race finish check — must land ON the finish, not past it
       const newIdx = this.world.currentIdx + steps;
       if (this._mode === 'race' && this.world.currentIdx >= this._modeParam - 1 && newIdx > this._modeParam) {
-        // Jumping past the finish → fall
-        this._startFall();
-        return;
+        this._startFall(); return;
       }
-
       this.score += steps;
       this.ui.updateScore(this.score);
       j.position.y = JUMPER.startY;
       this.world.advance(steps);
-      // Only advance safe respawn point by 1 per physical landing
       this._respawnIdx = this._respawnIdx + 1;
       this._transitionSteps = steps;
       this.network?.sendIdx(this.world.currentIdx);
 
-      // Win check — landed exactly on finish cube
       if (this._mode === 'race' && this.world.currentIdx === this._modeParam) {
-        this._finished = true;
-        this.input.disable();
-        this.network?.sendFinish();
-        this.ui.hideRaceBar();
-        // Don't show local popup — wait for server game_over (handled in main.js)
+        this._finished = true; this.input.disable();
+        this.network?.sendFinish(); this.ui.hideRaceBar();
         return;
       }
-
       this.state = GAME_STATES.TRANSITIONING;
-
     } else if (result.location === -1) {
-      // Landed back on current cube — safe
       this._respawnIdx = this.world.currentIdx;
       this.state = GAME_STATES.IDLE;
     } else {
       this._startFall();
     }
   }
-
-  /* ================================================================
-   *  TRANSITIONING
-   * ================================================================ */
 
   _updateTransitioning() {
     const d = this.cameraCtrl.current.distanceTo(this.cameraCtrl.target);
@@ -487,10 +432,6 @@ export class Game {
     }
   }
 
-  /* ================================================================
-   *  FALLING / RESPAWN
-   * ================================================================ */
-
   _startFall() {
     this._dead = true;
     this.state = GAME_STATES.FALLING;
@@ -498,100 +439,71 @@ export class Game {
     this.input.disable();
     this._transitionSteps = 0;
 
-    const j   = this.world.jumper;
+    const j = this.world.jumper;
     const dir = this.world.currentDir;
     const moveAxis = dir === 'left' ? 'x' : 'z';
-    const safeIdx = this._respawnIdx; // Last stable cube — never look far ahead
-
-    let nearest = null;
-    let nDist = Infinity;
+    const safeIdx = this._respawnIdx;
+    let nearest = null, nDist = Infinity;
     for (let i = Math.max(0, safeIdx - 1); i < this.world.cubes.length && i <= safeIdx + 2; i++) {
-      const d = Math.abs(j.position[moveAxis] - cubes[i].position[moveAxis]);
-      if (d < nDist) { nDist = d; nearest = cubes[i]; }
+      const d = Math.abs(j.position[moveAxis] - this.world.cubes[i].position[moveAxis]);
+      if (d < nDist) { nDist = d; nearest = this.world.cubes[i]; }
     }
-
-    if (!nearest || nDist > CUBE.width + JUMPER.width) {
-      this._fallMode = 'drop';
-      return;
-    }
-
-    this._fallMode  = 'tip';
-    this._tipAxis   = moveAxis;
+    if (!nearest || nDist > CUBE.width + JUMPER.width) { this._fallMode = 'drop'; return; }
+    this._fallMode = 'tip';
+    this._tipAxis = moveAxis;
     this._tipOutSign = (j.position[moveAxis] - nearest.position[moveAxis]) >= 0 ? 1 : -1;
-    // Server: need to tell it the last stable idx (already synced via update_idx)
     this.network?.sendDead();
   }
 
   _updateFalling() {
     if (this._fallEnded) return;
     const j = this.world.jumper;
-
     if (this._fallMode === 'drop') {
       if (j.position.y > GROUND_Y) j.position.y -= PHYSICS.fallSpeed;
       else this._endFall();
       return;
     }
-
     j.position[this._tipAxis] += this._tipOutSign * 0.08;
     if (j.position.y > GROUND_Y) j.position.y -= PHYSICS.fallSpeed;
     else this._endFall();
-
     this._resolveCubeCollisions();
   }
 
   _resolveCubeCollisions() {
-    // Only push away from nearest cube during tip fall.
-    // Don't interact with far-away cubes — that can cause
-    // phantom landings or free-respawns ahead.
     const j = this.world.jumper;
     const minSep = (CUBE.width + JUMPER.width) / 2;
-
-    // Find the single nearest cube along the movement axis
     const idx = this.world.currentIdx;
-    let nearest = null;
-    let nDist = Infinity;
+    let nearest = null, nDist = Infinity;
     for (let i = Math.max(0, idx - 1); i < this.world.cubes.length && i <= idx + 1; i++) {
       const d = Math.abs(j.position[this._tipAxis] - this.world.cubes[i].position[this._tipAxis]);
       if (d < nDist) { nDist = d; nearest = this.world.cubes[i]; }
     }
     if (!nearest) return;
-
     const d = j.position[this._tipAxis] - nearest.position[this._tipAxis];
-    if (Math.abs(d) < minSep) {
-      j.position[this._tipAxis] += (minSep - Math.abs(d)) * Math.sign(d);
-    }
+    if (Math.abs(d) < minSep) j.position[this._tipAxis] += (minSep - Math.abs(d)) * Math.sign(d);
   }
 
   _endFall() {
     this.world.jumper.position.y = GROUND_Y;
-    this._fallEnded = true;
-    this._alive = false;
+    this._fallEnded = true; this._alive = false;
     this.state = GAME_STATES.GAMEOVER;
-
-    // Start respawn timer: 1.5 seconds then resurrect at last stable cube
     this._respawnTimer = 1.5;
   }
 
   _doRespawn() {
-    this._dead = false;
-    this._alive = true;
-    // Respawn at the LAST STABLE cube, never ahead of where the jumper physically stood
+    this._dead = false; this._alive = true;
     const cube = this.world.cubes[this._respawnIdx];
     this.world.jumper.position.x = cube.position.x;
     this.world.jumper.position.z = cube.position.z;
     this.world.jumper.position.y = JUMPER.startY;
     this.world.jumper.rotation.set(0, 0, 0);
     this.world.jumper.scale.set(1, 1, 1);
-    // Reset world index to safe respawn point
     this.world.currentIdx = this._respawnIdx;
     this.state = GAME_STATES.IDLE;
-    this._chargePower = 0;
-    this._fallEnded = false;
-    this.input.enable();
-    this._hasLaunched = false;
+    this._chargePower = 0; this._fallEnded = false;
+    this.input.enable(); this._hasLaunched = false;
     this.cameraCtrl.updateTarget(this.world.cubes, this._respawnIdx);
   }
-
 
   _updateModeUI() {
     const data = this.getPlayersData();
