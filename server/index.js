@@ -1,19 +1,61 @@
 import { createServer as createHttpServer } from 'http';
-import { createServer as createViteServer } from 'vite';
 import { Server } from 'socket.io';
+import { existsSync, readFileSync } from 'fs';
+import { extname, join } from 'path';
 
 const PORT = process.env.PORT || 3000;
+const IS_PROD = existsSync('./dist'); // dist exists after npm run build
 
-const vite = await createViteServer({ server: { middlewareMode: true } });
+const MIME = {
+  '.html': 'text/html', '.js': 'application/javascript',
+  '.css': 'text/css', '.json': 'application/json',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+};
 
-const httpServer = createHttpServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('ok');
-    return;
-  }
-  vite.middlewares(req, res);
-});
+let httpServer;
+
+if (IS_PROD) {
+  // Production: serve static files from dist/
+  const distDir = join(process.cwd(), 'dist');
+  httpServer = createHttpServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('ok');
+      return;
+    }
+    let path = req.url.split('?')[0];
+    if (path === '/') path = '/index.html';
+    const filePath = join(distDir, path);
+    if (existsSync(filePath)) {
+      const ext = extname(path);
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      res.end(readFileSync(filePath));
+    } else {
+      // SPA fallback
+      const index = join(distDir, 'index.html');
+      if (existsSync(index)) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(readFileSync(index));
+      } else {
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    }
+  });
+} else {
+  // Development: use Vite middleware
+  const { createServer: createViteServer } = await import('vite');
+  const vite = await createViteServer({ server: { middlewareMode: true } });
+  httpServer = createHttpServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('ok');
+      return;
+    }
+    vite.middlewares(req, res);
+  });
+}
+
 const io = new Server(httpServer, { cors: { origin: '*' }, pingInterval: 2000 });
 
 const rooms = new Map();
@@ -78,14 +120,12 @@ io.on('connection', (socket) => {
     for (const [sid, p] of room.players) playerFaces.push({ id: sid, color: p.color, name: p.name });
     const faceAssignments = [];
     if (room.randomFaces) {
-      // Store indices into playerFaces array (not socket IDs). Stable across reconnects.
       const fr = rng(room.seed + 77777);
       for (let i = 0; i < totalCubes; i++) faceAssignments.push(Math.floor(fr() * playerFaces.length));
     }
     return { cubes, dirs, players, faceAssignments, playerFaces };
   }
 
-  // ── Commands ──────────────────────────────────────────────────
   socket.on('create_room', ({ color, name, playerId }) => {
     leaveRoom();
     const room = rooms.get(createRoom());
@@ -109,7 +149,6 @@ io.on('connection', (socket) => {
 
   socket.on('leave_room', () => { leaveRoom(); socket.emit('room_left'); });
 
-  // ── Reconnect ─────────────────────────────────────────────────
   socket.on('reconnect_room', ({ roomId, playerId }) => {
     leaveRoom();
     const room = rooms.get(roomId);
@@ -122,17 +161,12 @@ io.on('connection', (socket) => {
     oldData.offline = false; oldData.ping = 0;
     room.players.set(socket.id, oldData);
     socket.join(roomId); myRoom = roomId;
-
     const snap = getGameSnapshot(room);
-    // Regenerate playerFaces with current socket IDs (may have changed due to reconnect)
     const playerFaces = [...snap.playerFaces];
     room.playerFaces = playerFaces;
     socket.emit('reconnect_state', { roomId, playerId: socket.id, mode: room.mode, modeParam: room.modeParam,
-      cubes: snap.cubes, dirs: snap.dirs,
-      faceAssignments: room.faceAssignments,
-      playerFaces: playerFaces,
+      cubes: snap.cubes, dirs: snap.dirs, faceAssignments: room.faceAssignments, playerFaces,
       serverTime: Date.now(), players: snap.players });
-
     socket.to(myRoom).emit('player_reconnected', { oldSocketId: oldSid, socketId: socket.id, name: oldData.name, color: oldData.color, idx: oldData.idx, score: oldData.score });
     broadcastRoom(room);
   });
@@ -216,12 +250,11 @@ io.on('connection', (socket) => {
     const p = room.players.get(socket.id);
     if (!p) { myRoom = null; return; }
     p.offline = true;
-    const roomId = myRoom; // capture before myRoom = null
+    const roomId = myRoom;
     socket.to(roomId).emit('player_offline', { socketId: socket.id });
     broadcastRoom(room);
     p._disconnectTimer = setTimeout(() => {
-      const r = rooms.get(roomId); // use captured roomId
-      if (!r || !r.players.has(socket.id)) return;
+      const r = rooms.get(roomId); if (!r || !r.players.has(socket.id)) return;
       const wasHost = r.hostId === socket.id;
       r.players.delete(socket.id); socket.leave(roomId);
       if (r.players.size === 0) rooms.delete(roomId);
