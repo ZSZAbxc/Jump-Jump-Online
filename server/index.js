@@ -56,7 +56,13 @@ if (IS_PROD) {
   });
 }
 
-const io = new Server(httpServer, { cors: { origin: '*' }, pingInterval: 2000 });
+const io = new Server(httpServer, {
+  cors: { origin: '*' },
+  pingInterval: 3000,
+  transports: ['websocket'],
+  allowEIO3: false,
+  connectTimeout: 15000,
+});
 
 const rooms = new Map();
 

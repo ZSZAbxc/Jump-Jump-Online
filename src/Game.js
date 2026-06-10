@@ -41,6 +41,8 @@ export class Game {
     this._syncInterval = 0.066;
     this._texSynced = false;
     this._texDataURL = null;
+    this._frameAccum = 0;
+    this._lastFrameTime = 0;
 
     // Mode
     this._mode = 'race';
@@ -242,8 +244,20 @@ export class Game {
    *  MAIN LOOP
    * ================================================================ */
 
-  _loop() {
-    requestAnimationFrame(() => this._loop());
+  _loop(now) {
+    requestAnimationFrame((t) => this._loop(t));
+
+    // Real delta time (seconds)
+    const realDt = this._lastFrameTime ? Math.min(0.05, (now - this._lastFrameTime) / 1000) : 1 / 60;
+    this._lastFrameTime = now;
+
+    // Fixed 60Hz physics — accumulate real time, fire at most 60 times/sec
+    this._frameAccum += realDt;
+    if (this._frameAccum < 1 / 60) {
+      this.renderer.render();
+      return;
+    }
+    this._frameAccum -= 1 / 60;
 
     // Timed countdown (synced to server clock)
     if (this._timeRunning) {
@@ -255,11 +269,17 @@ export class Game {
         this._timeRunning = false;
         this.input.disable();
         this.network?.sendTimeUp(this.score);
-        // Wait for server to determine the winner (game_over handled in main.js)
         this._finished = true;
         return;
       }
     }
+
+    // Run physics at 60Hz max — skip frames above 60fps
+    if (this._frameAccum < 1 / 60) {
+      this.renderer.render();
+      return;
+    }
+    this._frameAccum -= 1 / 60;
 
     // Respawn timer
     if (this._respawnTimer > 0) {

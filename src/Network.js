@@ -32,7 +32,7 @@ export class Network {
 
   connect() {
     return new Promise((resolve, reject) => {
-      this.socket = io(this.url, { transports: ['websocket'], timeout: 8000 });
+      this.socket = io(this.url, { transports: ['websocket'], timeout: 20000, upgrade: false });
       this.socket.on('connect', () => resolve());
       this.socket.on('connect_error', (err) => {
         reject(new Error(`无法连接服务器 (${err.message})，请确保 npm run dev 正在运行`));
