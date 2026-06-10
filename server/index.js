@@ -2,7 +2,7 @@ import { createServer as createHttpServer } from 'http';
 import { createServer as createViteServer } from 'vite';
 import { Server } from 'socket.io';
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 const vite = await createViteServer({ server: { middlewareMode: true } });
 
