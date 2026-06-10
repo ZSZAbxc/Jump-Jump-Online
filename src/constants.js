@@ -27,7 +27,7 @@ export const JUMPER = {
 
 export const PHYSICS = {
   chargeSpeed: 0.002,   // power accumulated per frame
-  jumpSpeedX: 0.0375,   // +25%
+  jumpSpeedX: 0.045,    // +50%
   jumpSpeedY: 0.17,      // +100%
   gravity: 0.0075,       // +100%
   compressSpeed: 0.0112, // +100%
