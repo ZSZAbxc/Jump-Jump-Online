@@ -174,9 +174,21 @@ export class World {
       this._startRemoteSim(remote, state);
     }
     // Reset fall guard when player respawns
-    if (isIdle) remote._fallDone = false;
-    // Don't kill jump sim mid-flight — it self-destructs on landing
-    if (!isFall && remote.sim && remote.sim.type !== 'jump') {
+    if (isIdle) {
+      remote._fallDone = false;
+      // Respawn: hard-snap to server position then resume lerp
+      if (remote._awaitingRespawn && state.pos) {
+        remote._awaitingRespawn = false;
+        remote.mesh.position.set(state.pos.x, state.pos.y, state.pos.z);
+        remote.mesh.scale.set(1, 1, 1);
+      }
+    }
+    // Update charge power cap from server
+    if (state.chargePower !== undefined) {
+      remote._serverChargePower = state.chargePower;
+    }
+    // Don't kill jump or charging sim mid-flight — they self-destruct
+    if (!isFall && remote.sim && remote.sim.type !== 'jump' && remote.sim.type !== 'charging') {
       remote.sim = null;
     }
 
@@ -196,6 +208,9 @@ export class World {
     const remote = this.remotes.get(id);
     if (!remote) return;
     if (!data || !data.pos) return;
+    // Clear charging sim if present — transition to jump
+    remote.sim = null;
+    remote._serverChargePower = 0;
     // Calculate exact velocities from charge power
     const velX = data.chargePower * 1.3125;
     const velY = PHYSICS.jumpSpeedY + data.chargePower * 2.6;
@@ -210,6 +225,16 @@ export class World {
     };
     remote.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
     remote.mesh.scale.set(2 - data.scaleY, data.scaleY, 2 - data.scaleY);
+  }
+
+  /** Remote player started charging — begin local squash simulation. */
+  remoteChargeStart(id, chargePower) {
+    const remote = this.remotes.get(id);
+    if (!remote) return;
+    remote._serverChargePower = chargePower;
+    if (!remote.sim || remote.sim.type !== 'charging') {
+      remote.sim = { type: 'charging', power: 0 };
+    }
   }
 
   /** Internal — detect falling and start local sim. */
@@ -239,7 +264,22 @@ export class World {
       const sim = remote.sim;
       const sp = remote.serverPos;
 
-      if (sim && sim.type === 'jump') {
+      if (sim && sim.type === 'charging') {
+        // ── CHARGING: local squash sim (same physics as local player) ──
+        const cap = remote._serverChargePower || 0;
+        if (sim.power < cap) {
+          sim.power = Math.min(cap, sim.power + PHYSICS.chargeSpeed);
+        }
+        if (m.scale.y > 0.02) {
+          const rate = PHYSICS.compressSpeed + sim.power * 0.03;
+          m.scale.y = Math.max(0.02, m.scale.y - rate);
+          const w = 1 + (1 - m.scale.y);
+          m.scale.x = w; m.scale.z = w;
+        }
+        // Gentle drift to server position
+        m.position.x += (remote.targetPos.x - m.position.x) * 0.2;
+        m.position.z += (remote.targetPos.z - m.position.z) * 0.2;
+      } else if (sim && sim.type === 'jump') {
         // ── JUMP: parabolic arc (local sim, no server drift) ──
         m.position[sim.axis] -= sim.velX;
         sim.pos.y += sim.velY;
@@ -266,11 +306,14 @@ export class World {
           m.position.y = GROUND_Y;
           remote.sim = null;
           remote._fallDone = true;
-          remote._justFell = true; // next frame: hard-snap to server
+          remote._awaitingRespawn = true;
         }
       } else {
-        // ── IDLE/CHARGING: first frame after land/fall → hard-snap, then lerp ──
-        if (remote._justLanded || remote._justFell) {
+        // ── IDLE/CHARGING: handle landing snap or lerp ──
+        if (remote._awaitingRespawn) {
+          // Hold at last known position until server sends respawn
+          // (no-op — position stays where fall sim left it)
+        } else if (remote._justLanded || remote._justFell) {
           m.position.set(remote.targetPos.x, remote.targetPos.y, remote.targetPos.z);
           m.scale.set(1, 1, 1);
           remote._justLanded = false;

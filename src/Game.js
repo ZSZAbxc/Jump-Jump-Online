@@ -326,6 +326,8 @@ export class Game {
       name: this._myName,
       color: this._myColorHex,
     };
+    // Include chargePower so remotes can locally simulate squash
+    if (this.state === GAME_STATES.CHARGING) payload.chargePower = this._chargePower;
     if (!this._texSynced && this._texDataURL) {
       this._texSynced = true;
       payload.texData = this._texDataURL;
@@ -345,6 +347,10 @@ export class Game {
         chargePower: state.jumpCharge, dir: state.jumpDir,
         pos: state.pos, scaleY: state.scaleY,
       });
+    }
+    // Charging: start/update local squash simulation
+    if (state.state === 'charging' && state.chargePower !== undefined) {
+      this.world.remoteChargeStart(id, state.chargePower);
     }
     this._remotePlayers.set(id, {
       name: state.name || '玩家',
@@ -382,6 +388,8 @@ export class Game {
     this.state = GAME_STATES.CHARGING;
     this._chargePower = 0;
     if (this.audioManager) this._chargeHandle = this.audioManager.playCharge();
+    // Force immediate sync so remotes see charging start
+    this._syncTimer = 999;
   }
 
   _onRelease() {
@@ -490,6 +498,16 @@ export class Game {
   }
 
   _startFall() {
+    // Broadcast fall to other players before marking dead (syncState skips dead)
+    const j = this.world.jumper;
+    this.network?.sendState({
+      state: 'falling',
+      pos: { x: j.position.x, y: j.position.y, z: j.position.z },
+      rot: { x: j.rotation.x, y: j.rotation.y, z: j.rotation.z },
+      scaleY: j.scale.y,
+      score: this.score, idx: this.world.currentIdx,
+      name: this._myName, color: this._myColorHex,
+    });
     this._dead = true;
     this.state = GAME_STATES.FALLING;
     this._fallEnded = false;
@@ -497,7 +515,6 @@ export class Game {
     this._transitionSteps = 0;
     if (this.audioManager && this._chargeHandle) { this.audioManager.playJump(this._chargeHandle); this._chargeHandle = null; }
 
-    const j = this.world.jumper;
     const dir = this.world.currentDir;
     const moveAxis = dir === 'left' ? 'x' : 'z';
     const safeIdx = this._respawnIdx;
@@ -562,6 +579,7 @@ export class Game {
     this.input.enable(); this._hasLaunched = false;
     this.cameraCtrl.updateTarget(this.world.cubes, this._respawnIdx);
     this.world.updateNameSprite();
+    this._syncTimer = 999; // force re-sync so remotes hard-snap to new position
   }
 
   _updateModeUI() {
