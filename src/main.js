@@ -141,6 +141,9 @@ network.onBecomeHost = () => {
 network.onReconnectState = (data) => {
   network.playerId = data.playerId; // update to new socket ID
   network.roomId = data.roomId;
+  // Update myName from server's deduped name
+  const me = data.players?.find(p => p.socketId === data.playerId);
+  if (me?.name) { myName = me.name; game.setMyName(myName); world.setJumperName(myName); }
   ui.hideWaitingScreen();
   ui.hideGameOver();
   world.loadSharedCubes(data.cubes, data.dirs, data.mode, data.modeParam, data.faceAssignments, data.playerFaces);
@@ -251,12 +254,17 @@ async function startRoomFlow() {
     try {
       await new Promise((resolve, reject) => {
         const done = { value: false };
-        const onJoined = ({ roomId }) => {
+        const onJoined = ({ roomId, name }) => {
           if (done.value) return;
           done.value = true;
           network.socket.off('room_joined', onJoined);
           network.socket.off('error', onError);
           amHost = action === 'create';
+          if (name) {
+            myName = name; // accept server-assigned deduped name
+            game.setMyName(myName);
+            world.setJumperName(myName);
+          }
           world.setMyPlayerId(network.playerId);
           // Now that we know our socket ID, register self texture for cube faces
           if (game._texDataURL) world.setSelfFaceTex(game._texDataURL);

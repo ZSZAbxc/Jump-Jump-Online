@@ -149,7 +149,7 @@ io.on('connection', (socket) => {
     room.hostId = socket.id;
     room.players.set(socket.id, { playerId, color, name: dedupName(room, name), ready: true, alive: true, score: 0, idx: 0, ping: 0, offline: false });
     socket.join(room.id); myRoom = room.id;
-    socket.emit('room_joined', { roomId: room.id, playerId: socket.id, modeConfig: { mode: room.mode, param: room.modeParam, randomFaces: room.randomFaces } });
+    socket.emit('room_joined', { roomId: room.id, playerId: socket.id, name: room.players.get(socket.id).name, modeConfig: { mode: room.mode, param: room.modeParam, randomFaces: room.randomFaces } });
     broadcastRoom(room);
   });
 
@@ -160,7 +160,7 @@ io.on('connection', (socket) => {
     if (room.started) { socket.emit('error', '游戏已开始'); return; }
     room.players.set(socket.id, { playerId, color, name: dedupName(room, name), ready: false, alive: true, score: 0, idx: 0, ping: 0, offline: false });
     socket.join(roomId); myRoom = roomId;
-    socket.emit('room_joined', { roomId, playerId: socket.id, modeConfig: { mode: room.mode, param: room.modeParam, randomFaces: room.randomFaces } });
+    socket.emit('room_joined', { roomId, playerId: socket.id, name: room.players.get(socket.id).name, modeConfig: { mode: room.mode, param: room.modeParam, randomFaces: room.randomFaces } });
     broadcastRoom(room);
   });
 
