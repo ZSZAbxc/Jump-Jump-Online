@@ -32,6 +32,8 @@ export class Network {
     this.onEndGameVoteStart = null;
     this.onEndGameVoteUpdate = null;
     this.onEndGameVoteEnd = null;
+    this.onRemoteJumpStart = null;
+    this.onRemoteJumpLand = null;
     this.onError = null;
   }
 
@@ -83,6 +85,8 @@ export class Network {
     this.socket.on('end_game_vote_start', (data) => { this.onEndGameVoteStart?.(data); });
     this.socket.on('end_game_vote_update', (data) => { this.onEndGameVoteUpdate?.(data); });
     this.socket.on('end_game_vote_end', (data) => { this.onEndGameVoteEnd?.(data); });
+    this.socket.on('remote_jump_start', (data) => { this.onRemoteJumpStart?.(data); });
+    this.socket.on('remote_jump_land', (data) => { this.onRemoteJumpLand?.(data); });
     this.socket.on('error', (msg) => { this.onError?.(msg); });
   }
 

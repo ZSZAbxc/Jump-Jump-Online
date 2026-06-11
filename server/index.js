@@ -229,6 +229,16 @@ io.on('connection', (socket) => {
     socket.to(myRoom).emit('remote_state', { socketId: socket.id, ...state });
   });
 
+  socket.on('jump_start', (data) => {
+    const room = rooms.get(myRoom); if (!room || !room.started) return;
+    socket.to(myRoom).emit('remote_jump_start', { socketId: socket.id, ...data });
+  });
+
+  socket.on('jump_land', (data) => {
+    const room = rooms.get(myRoom); if (!room || !room.started) return;
+    socket.to(myRoom).emit('remote_jump_land', { socketId: socket.id, ...data });
+  });
+
   socket.on('player_dead', () => {
     const room = rooms.get(myRoom); if (!room || !room.started) return;
     const p = room.players.get(socket.id); if (p) socket.emit('respawn', { idx: p.idx });

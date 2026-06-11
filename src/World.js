@@ -183,53 +183,86 @@ export class World {
     const remote = this.remotes.get(id);
     if (!remote) return;
 
-    // Detect falling for slide-off animation
     const isFalling = state.state === 'falling' || state.state === 'gameover';
-    if (isFalling && !remote._falling) {
-      remote._falling = true;
-    } else if (!isFalling && remote._falling) {
-      remote._falling = false;
-    }
+    if (isFalling && !remote._falling) { remote._falling = true; }
+    else if (!isFalling && remote._falling) { remote._falling = false; }
 
-    // Always chase server position and scale — smooth lerp does the rest
+    // During local jump sim, don't chase the server — the sim will be corrected on land
+    if (remote._simJump) return;
+
     remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
     remote.targetRot.set(state.rot.x, state.rot.y, state.rot.z);
     remote.targetScaleY = state.scaleY;
   }
 
+  /** Event: remote player started a jump. Begin local simulation. */
+  remoteJumpStart(id, data) {
+    const remote = this.remotes.get(id);
+    if (!remote) return;
+    remote._simJump = true;
+    remote._simJumpVelX = data.chargePower * 1.3125;
+    remote._simJumpVelY = PHYSICS.jumpSpeedY + data.chargePower * 2.6;
+    remote._simJumpDir = data.dir;
+    remote._simJumpY = data.pos.y;
+    remote._simJumpX = data.pos.x;
+    remote._simJumpZ = data.pos.z;
+    remote._chargePower = data.chargePower;
+    remote._releaseScaleY = data.scaleY;
+    // Reset mesh to launch position
+    remote.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
+    remote.mesh.scale.set(2 - data.scaleY, data.scaleY, 2 - data.scaleY);
+  }
+
+  /** Event: remote player landed. Snap position and end simulation. */
+  remoteJumpLand(id, data) {
+    const remote = this.remotes.get(id);
+    if (!remote) return;
+    remote._simJump = false;
+    remote.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
+    remote.mesh.scale.set(1, 1, 1);
+  }
+
   lerpRemotes(dt) {
     if (this.remotes.size === 0) return;
-    // Strong interpolation — catches up to server in ~3 frames (50ms)
     const t = Math.min(0.6, dt * 30);
     for (const remote of this.remotes.values()) {
       const m = remote.mesh; if (!m) continue;
 
       if (remote._falling) {
-        // ── Local fall animation ──
-        remote._fallTimer = (remote._fallTimer || 0) + dt;
-        if (m.position.y > GROUND_Y) {
-          m.position.y -= PHYSICS.fallSpeed;
-        } else {
-          m.position.y = GROUND_Y;
-          remote._falling = false;
+        m.position.y = Math.max(GROUND_Y, m.position.y - PHYSICS.fallSpeed);
+        if (m.position.y <= GROUND_Y) remote._falling = false;
+        continue;
+      }
+
+      // ── Local jump simulation (event-driven) ──
+      if (remote._simJump) {
+        // Parabolic arc — use same constants as local game
+        const dir = remote._simJumpDir;
+        // Horizontal
+        if (dir === 'left') m.position.x -= remote._simJumpVelX;
+        else m.position.z -= remote._simJumpVelX;
+        // Vertical
+        remote._simJumpY += remote._simJumpVelY;
+        remote._simJumpVelY -= PHYSICS.gravity;
+        m.position.y = remote._simJumpY;
+
+        // Restore squash
+        if (m.scale.y < 1) {
+          m.scale.y = Math.min(1, m.scale.y + PHYSICS.releaseSpeed);
+          m.scale.x = 1 + (1 - m.scale.y);
+          m.scale.z = 1 + (1 - m.scale.y);
         }
         continue;
       }
 
-      // ── Smooth interpolation for position ──
+      // ── Normal lerp (charging/idle/transitioning) ──
       m.position.x += (remote.targetPos.x - m.position.x) * t;
       m.position.y += (remote.targetPos.y - m.position.y) * t;
       m.position.z += (remote.targetPos.z - m.position.z) * t;
-
-      // ── Scale: Y compression + proportional widen ──
-      const desiredScaleY = remote.targetScaleY;
-      const currentScaleY = m.scale.y;
-      const newScaleY = currentScaleY + (desiredScaleY - currentScaleY) * t;
-      m.scale.y = newScaleY;
-      // Widen proportionally: Y shrinks → X and Z grow
-      const widen = 1 + (1 - newScaleY);
-      m.scale.x = widen;
-      m.scale.z = widen;
+      const sy = m.scale.y + (remote.targetScaleY - m.scale.y) * t;
+      m.scale.y = sy;
+      const w = 1 + (1 - sy);
+      m.scale.x = m.scale.z = w;
     }
   }
 

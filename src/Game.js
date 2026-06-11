@@ -306,8 +306,10 @@ export class Game {
   _syncState() {
     if (this._dead || this._finished) return;
     if (!this.network || !this.network.roomId) return;
-    // Sync every other physics tick during active states (30Hz), less when idle (6Hz)
-    const syncRate = (this.state === GAME_STATES.CHARGING || this.state === GAME_STATES.JUMPING) ? 0.033 : 0.166;
+    // Skip during jumping — event-based sync handles this
+    if (this.state === GAME_STATES.JUMPING) return;
+    // Sync during charging (30Hz) for squash animation, otherwise 6Hz
+    const syncRate = (this.state === GAME_STATES.CHARGING) ? 0.033 : 0.166;
     this._syncTimer += 0.016;
     if (this._syncTimer < syncRate) return;
     this._syncTimer = 0;
@@ -337,6 +339,13 @@ export class Game {
     if (this._dead || this._finished) return;
     this.world.addOrUpdateRemote(id, parseInt(state.color.replace('#', ''), 16), state.texData, state.name);
     this.world.updateRemoteState(id, state);
+    // Event-based jump: start local simulation when remote player begins jumping
+    if (state.jumpCharge !== undefined) {
+      this.world.remoteJumpStart(id, {
+        chargePower: state.jumpCharge, dir: state.jumpDir,
+        pos: state.pos, scaleY: state.scaleY,
+      });
+    }
     this._remotePlayers.set(id, {
       name: state.name || '玩家',
       color: state.color || '#232323',
@@ -385,6 +394,14 @@ export class Game {
     this._chargePower = 0;
     this.world.jumper.scale.set(1, 1, 1);
     if (this.audioManager) { this.audioManager.playJump(this._chargeHandle); this._chargeHandle = null; }
+    // Event-based sync — send jump start once, rest is simulated locally
+    this.network?.sendState({
+      state: 'jumping', score: this.score, idx: this.world.currentIdx,
+      name: this._myName, color: this._myColorHex,
+      jumpCharge: this._chargePower, jumpDir: this.world.currentDir,
+      pos: { x: this.world.jumper.position.x, y: this.world.jumper.position.y, z: this.world.jumper.position.z },
+      scaleY: 1,
+    });
   }
 
   /* ================================================================
