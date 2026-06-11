@@ -326,8 +326,6 @@ export class Game {
       name: this._myName,
       color: this._myColorHex,
     };
-    // Include chargePower so remotes can locally simulate squash
-    if (this.state === GAME_STATES.CHARGING) payload.chargePower = this._chargePower;
     if (!this._texSynced && this._texDataURL) {
       this._texSynced = true;
       payload.texData = this._texDataURL;
@@ -347,10 +345,6 @@ export class Game {
         chargePower: state.jumpCharge, dir: state.jumpDir,
         pos: state.pos, scaleY: state.scaleY,
       });
-    }
-    // Charging: start/update local squash simulation
-    if (state.state === 'charging' && state.chargePower !== undefined) {
-      this.world.remoteChargeStart(id, state.chargePower);
     }
     this._remotePlayers.set(id, {
       name: state.name || '玩家',
@@ -388,8 +382,6 @@ export class Game {
     this.state = GAME_STATES.CHARGING;
     this._chargePower = 0;
     if (this.audioManager) this._chargeHandle = this.audioManager.playCharge();
-    // Force immediate sync so remotes see charging start
-    this._syncTimer = 999;
   }
 
   _onRelease() {

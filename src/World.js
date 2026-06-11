@@ -115,7 +115,7 @@ export class World {
       const mesh = new THREE.Mesh(geo, mats);
       mesh.add(this._makeNameSprite(name || '', colorHex, 0.6));
       this.scene.add(mesh);
-      remote = { mesh, color: colorHex, name, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, sim: null, serverPos: null, _simIdx: 0, _serverChargePower: 0 };
+      remote = { mesh, color: colorHex, name, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, sim: null, serverPos: null, _simIdx: 0 };
       this.remotes.set(id, remote);
       if (texData) { this._playerFaceTex.set(id, texData); this._updateCubeFacesForPlayer(id, texData); }
       return remote;
@@ -190,15 +190,11 @@ export class World {
       remote.mesh.position.set(state.pos.x, state.pos.y, state.pos.z);
       remote._simIdx = state.idx ?? remote._simIdx;
     }
-    // Update charge power cap from server
-    if (state.chargePower !== undefined) {
-      remote._serverChargePower = state.chargePower;
-    }
     // Track server cube index for landing correction
     if (state.idx != null) remote._serverIdx = state.idx;
     if (state.idx != null && !remote.sim) remote._simIdx = state.idx;
-    // Don't kill jump or charging sim mid-flight — they self-destruct
-    if (!isFall && remote.sim && remote.sim.type !== 'jump' && remote.sim.type !== 'charging') {
+    // Don't kill jump sim mid-flight — it self-destructs on landing
+    if (!isFall && remote.sim && remote.sim.type !== 'jump') {
       remote.sim = null;
     }
 
@@ -218,9 +214,7 @@ export class World {
     const remote = this.remotes.get(id);
     if (!remote) return;
     if (!data || !data.pos) return;
-    // Clear charging sim if present — transition to jump
     remote.sim = null;
-    remote._serverChargePower = 0;
     // Calculate exact velocities from charge power
     const velX = data.chargePower * 1.3125;
     const velY = PHYSICS.jumpSpeedY + data.chargePower * 2.6;
@@ -236,16 +230,6 @@ export class World {
     };
     remote.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
     remote.mesh.scale.set(2 - data.scaleY, data.scaleY, 2 - data.scaleY);
-  }
-
-  /** Remote player started charging — begin local squash simulation. */
-  remoteChargeStart(id, chargePower) {
-    const remote = this.remotes.get(id);
-    if (!remote) return;
-    remote._serverChargePower = chargePower;
-    if (!remote.sim || remote.sim.type !== 'charging') {
-      remote.sim = { type: 'charging', power: 0 };
-    }
   }
 
   /** Internal — detect falling and start local sim. */
@@ -274,22 +258,7 @@ export class World {
       const m = remote.mesh; if (!m) continue;
       const sim = remote.sim;
 
-      if (sim && sim.type === 'charging') {
-        // ── CHARGING: local squash sim (same physics as local player) ──
-        const cap = remote._serverChargePower || 0;
-        if (sim.power < cap) {
-          sim.power = Math.min(cap, sim.power + PHYSICS.chargeSpeed);
-        }
-        if (m.scale.y > 0.02) {
-          const rate = PHYSICS.compressSpeed + sim.power * 0.03;
-          m.scale.y = Math.max(0.02, m.scale.y - rate);
-          const w = 1 + (1 - m.scale.y);
-          m.scale.x = w; m.scale.z = w;
-        }
-        // Gentle drift to server position
-        m.position.x += (remote.targetPos.x - m.position.x) * 0.2;
-        m.position.z += (remote.targetPos.z - m.position.z) * 0.2;
-      } else if (sim && sim.type === 'jump') {
+      if (sim && sim.type === 'jump') {
         // ── JUMP: parabolic arc (local sim, no server drift) ──
         m.position[sim.axis] -= sim.velX;
         sim.pos.y += sim.velY;
@@ -341,7 +310,7 @@ export class World {
           remote._awaitingRespawn = true;
         }
       } else {
-        // ── IDLE / CHARGING (no sim): hold after local sim finishes, otherwise lerp ──
+        // ── IDLE / CHARGING (no sim): hold during wait, otherwise lerp ──
         if (remote._awaitingRespawn || remote._pendingServerSnap) {
           // Hold — server will send position and hard-snap in updateRemoteState
         } else {
