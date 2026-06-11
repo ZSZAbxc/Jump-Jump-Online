@@ -306,8 +306,10 @@ export class Game {
   _syncState() {
     if (this._dead || this._finished) return;
     if (!this.network || !this.network.roomId) return;
+    // Sync every other physics tick during active states (30Hz), less when idle (6Hz)
+    const syncRate = (this.state === GAME_STATES.CHARGING || this.state === GAME_STATES.JUMPING) ? 0.033 : 0.166;
     this._syncTimer += 0.016;
-    if (this._syncTimer < 0.033) return;
+    if (this._syncTimer < syncRate) return;
     this._syncTimer = 0;
 
     const j = this.world.jumper;

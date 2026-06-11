@@ -183,68 +183,31 @@ export class World {
     const remote = this.remotes.get(id);
     if (!remote) return;
 
-    const prevState = remote._remoteState;
+    // Detect falling for slide-off animation
     const isFalling = state.state === 'falling' || state.state === 'gameover';
     if (isFalling && !remote._falling) {
       remote._falling = true;
-      remote._fallStartY = remote.targetPos.y;
-      const dx = state.pos.x - remote.targetPos.x;
-      const dz = state.pos.z - remote.targetPos.z;
-      const absDx = Math.abs(dx), absDz = Math.abs(dz);
-      remote._fallMoveAxis = absDz > absDx ? 'z' : 'x';
-      remote._fallOutSign = (remote._fallMoveAxis === 'x' ? dx : dz) >= 0 ? 1 : -1;
-      remote._fallTimer = 0;
     } else if (!isFalling && remote._falling) {
       remote._falling = false;
     }
 
-    // ── Client-side jump prediction ──────────────────────────────
-    // When a remote player starts charging or jumping, start local
-    // simulation so the animation runs at 60fps instead of 30Hz lerp.
-    const newState = state.state;
-    if (newState === 'charging' && prevState !== 'charging') {
-      // Start local charge animation
-      remote._simCharge = true;
-      remote._simChargePower = 0;
-    } else if (newState === 'jumping' && (prevState === 'charging' || prevState === 'idle')) {
-      // Start local jump simulation — compute initial velocities from the
-      // position delta between this sync and the last known position.
-      const dx = state.pos.x - remote.targetPos.x;
-      const dy = state.pos.y - remote.targetPos.y;
-      const dz = state.pos.z - remote.targetPos.z;
-      remote._simJump = true;
-      // Use same physics parameters as local jump for consistency
-      remote._simJumpVelY = PHYSICS.jumpSpeedY;
-      remote._simJumpVelX = PHYSICS.jumpSpeedX;
-      remote._simJumpDir = Math.abs(dz) > Math.abs(dx) ? 'right' : 'left';
-      remote._simJumpY = state.pos.y;
-      // Start from remote's actual position
-      remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
-    } else if (newState !== 'charging' && newState !== 'jumping') {
-      remote._simCharge = false;
-      remote._simJump = false;
-      // For idle/transitioning, snap to synced position smoothly
-      remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
-    }
-
-    // Always store server target for correction
-    remote._serverPos = { x: state.pos.x, y: state.pos.y, z: state.pos.z };
+    // Always chase server position and scale — smooth lerp does the rest
+    remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
     remote.targetRot.set(state.rot.x, state.rot.y, state.rot.z);
     remote.targetScaleY = state.scaleY;
-    remote._remoteState = newState;
   }
 
   lerpRemotes(dt) {
     if (this.remotes.size === 0) return;
-    const smoothT = 0.2; // gentle correction toward server position
+    // Strong interpolation — catches up to server in ~3 frames (50ms)
+    const t = Math.min(0.6, dt * 30);
     for (const remote of this.remotes.values()) {
       const m = remote.mesh; if (!m) continue;
 
-      // ── Local fall animation ──
       if (remote._falling) {
-        remote._fallTimer += dt;
+        // ── Local fall animation ──
+        remote._fallTimer = (remote._fallTimer || 0) + dt;
         if (m.position.y > GROUND_Y) {
-          m.position[remote._fallMoveAxis] += remote._fallOutSign * 0.06;
           m.position.y -= PHYSICS.fallSpeed;
         } else {
           m.position.y = GROUND_Y;
@@ -253,52 +216,20 @@ export class World {
         continue;
       }
 
-      // ── Local charge simulation ──
-      if (remote._simCharge) {
-        if (m.scale.y > 0.02) {
-          const squashRate = PHYSICS.compressSpeed + remote._simChargePower * 0.03;
-          m.scale.y -= squashRate;
-          remote._simChargePower += PHYSICS.chargeSpeed;
-          m.scale.x = 1 + (1 - m.scale.y);
-          m.scale.z = 1 + (1 - m.scale.y);
-        }
-        // Gently correct position toward server
-        if (remote._serverPos) {
-          m.position.x += (remote._serverPos.x - m.position.x) * smoothT;
-          m.position.z += (remote._serverPos.z - m.position.z) * smoothT;
-        }
-        continue;
-      }
+      // ── Smooth interpolation for position ──
+      m.position.x += (remote.targetPos.x - m.position.x) * t;
+      m.position.y += (remote.targetPos.y - m.position.y) * t;
+      m.position.z += (remote.targetPos.z - m.position.z) * t;
 
-      // ── Local jump simulation ──
-      if (remote._simJump) {
-        // Apply parabolic trajectory locally
-        const moveAxis = remote._simJumpDir === 'left' ? 'x' : 'z';
-        m.position[moveAxis] -= remote._simJumpVelX / 60;
-        remote._simJumpY += remote._simJumpVelY / 60;
-        remote._simJumpVelY -= PHYSICS.gravity;
-        m.position.y = remote._simJumpY;
-
-        // Restore squash
-        if (m.scale.y < 1) {
-          m.scale.y = Math.min(1, m.scale.y + PHYSICS.releaseSpeed);
-          m.scale.x = 1 + (1 - m.scale.y);
-          m.scale.z = 1 + (1 - m.scale.y);
-        }
-
-        // Gently correct toward server position for drift
-        if (remote._serverPos) {
-          m.position.x += (remote._serverPos.x - m.position.x) * smoothT;
-          m.position.z += (remote._serverPos.z - m.position.z) * smoothT;
-        }
-        continue;
-      }
-
-      // ── Normal lerp (idle/transitioning) ──
-      m.position.x += (remote.targetPos.x - m.position.x) * 0.4;
-      m.position.y += (remote.targetPos.y - m.position.y) * 0.4;
-      m.position.z += (remote.targetPos.z - m.position.z) * 0.4;
-      m.scale.y += (remote.targetScaleY - m.scale.y) * 0.4;
+      // ── Scale: Y compression + proportional widen ──
+      const desiredScaleY = remote.targetScaleY;
+      const currentScaleY = m.scale.y;
+      const newScaleY = currentScaleY + (desiredScaleY - currentScaleY) * t;
+      m.scale.y = newScaleY;
+      // Widen proportionally: Y shrinks → X and Z grow
+      const widen = 1 + (1 - newScaleY);
+      m.scale.x = widen;
+      m.scale.z = widen;
     }
   }
 
