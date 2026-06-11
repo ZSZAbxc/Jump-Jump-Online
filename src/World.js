@@ -213,8 +213,9 @@ export class World {
       const dy = state.pos.y - remote.targetPos.y;
       const dz = state.pos.z - remote.targetPos.z;
       remote._simJump = true;
-      remote._simJumpVelY = Math.max(dy * 60, PHYSICS.jumpSpeedY); // approximate
-      remote._simJumpVelX = Math.max(Math.abs(dx * 60), Math.abs(dz * 60)) || PHYSICS.jumpSpeedX;
+      // Use same physics parameters as local jump for consistency
+      remote._simJumpVelY = PHYSICS.jumpSpeedY;
+      remote._simJumpVelX = PHYSICS.jumpSpeedX;
       remote._simJumpDir = Math.abs(dz) > Math.abs(dx) ? 'right' : 'left';
       remote._simJumpY = state.pos.y;
       // Start from remote's actual position
