@@ -341,7 +341,6 @@ export class Game {
     this.world.updateRemoteState(id, state);
     // Event-based jump: start local simulation when remote player begins jumping
     if (state.jumpCharge !== undefined) {
-      console.log('[remote] jumpStart', id, 'charge', state.jumpCharge);
       this.world.remoteJumpStart(id, {
         chargePower: state.jumpCharge, dir: state.jumpDir,
         pos: state.pos, scaleY: state.scaleY,
