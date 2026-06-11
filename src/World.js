@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import { CUBE, JUMPER, COLORS, GROUND_Y, PHYSICS } from './constants.js';
 
 export class World {
@@ -26,7 +25,6 @@ export class World {
   setJumperName(name) { this._jumperName = name; }
   setMyPlayerId(id) {
     this._myPlayerId = id;
-    // Apply pending self texture now that we know our ID
     if (this._pendingSelfTex) {
       this._playerFaceTex.set(id, this._pendingSelfTex);
       this._updateCubeFacesForPlayer(id, this._pendingSelfTex);
@@ -67,7 +65,6 @@ export class World {
       if (i > 0) this.directions.push(dirData[i - 1]);
     }
     this.currentIdx = 0;
-    // Re-apply pending textures
     for (const [pid, texDataURL] of this._playerFaceTex) {
       this._updateCubeFacesForPlayer(pid, texDataURL);
     }
@@ -79,27 +76,18 @@ export class World {
   advance(steps) { this.currentIdx += steps; }
 
   updateFades() {
-    const visStart = Math.max(0, this.currentIdx - 2);
-    const visEnd   = this.currentIdx + 3;
+    const vs = Math.max(0, this.currentIdx - 2);
+    const ve = this.currentIdx + 3;
     for (let i = 0; i < this.cubes.length; i++) {
-      const target = (i >= visStart && i <= visEnd) ? 1 : 0;
-      this._setGroupOpacity(this.cubes[i].material, target);
+      const tgt = (i >= vs && i <= ve) ? 1 : 0;
+      this._setGroupOpacity(this.cubes[i].material, tgt);
     }
   }
 
   reset() {
-    while (this.cubes.length) {
-      const c = this.cubes.pop();
-      this._disposeMaterials(c.material);
-      c.geometry.dispose();
-      this.scene.remove(c);
-    }
+    while (this.cubes.length) { const c = this.cubes.pop(); this._disposeMaterials(c.material); c.geometry.dispose(); this.scene.remove(c); }
     this.directions.length = 0;
-    for (const [, remote] of this.remotes) {
-      this._disposeMaterials(remote.mesh.material);
-      remote.mesh.geometry.dispose();
-      this.scene.remove(remote.mesh);
-    }
+    for (const [, remote] of this.remotes) { this._disposeMaterials(remote.mesh.material); remote.mesh.geometry.dispose(); this.scene.remove(remote.mesh); }
     this.remotes.clear();
   }
 
@@ -120,22 +108,20 @@ export class World {
         tex.center.set(0.5, 0.5); tex.rotation = 2 * Math.PI / 3;
         img.onload = () => { tex.needsUpdate = true; };
         topMat = new THREE.MeshLambertMaterial({ map: tex, color: 0xffffff, transparent: true, opacity: 0.6 });
-      } else {
-        topMat = new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.6 });
-      }
+      } else { topMat = new THREE.MeshLambertMaterial({ color, transparent: true, opacity: 0.6 }); }
       const mats = [side, topMat, bottom];
       const mesh = new THREE.Mesh(geo, mats);
       mesh.add(this._makeNameSprite(name || '', colorHex, 0.6));
       this.scene.add(mesh);
-      remote = { mesh, color: colorHex, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, _remoteState: 'idle' };
+      remote = { mesh, color: colorHex, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, sim: null, serverPos: null };
       this.remotes.set(id, remote);
       if (texData) { this._playerFaceTex.set(id, texData); this._updateCubeFacesForPlayer(id, texData); }
       return remote;
     }
     if (remote.name !== name) {
       remote.name = name;
-      const oldSprite = remote.mesh.children.find(c => c.isSprite);
-      if (oldSprite) remote.mesh.remove(oldSprite);
+      const oldS = remote.mesh.children.find(c => c.isSprite);
+      if (oldS) remote.mesh.remove(oldS);
       if (name) remote.mesh.add(this._makeNameSprite(name, colorHex, 0.6));
     }
     if (remote.color !== colorHex) {
@@ -143,126 +129,136 @@ export class World {
       for (const m of mats) { if (!m.map) m.color.set(colorHex); }
       remote.color = colorHex;
     }
-    if (texData && remote._faceTexApplied !== texData) {
-      remote._faceTexApplied = texData;
-      this._updateCubeFacesForPlayer(id, texData);
-    }
+    if (texData && remote._faceTexApplied !== texData) { remote._faceTexApplied = texData; this._updateCubeFacesForPlayer(id, texData); }
     return remote;
   }
 
-  _updateCubeFacesForPlayer(playerId, texDataURL) {
-    const img = new Image(); img.src = texDataURL;
+  _updateCubeFacesForPlayer(pId, texURL) {
+    const img = new Image(); img.src = texURL;
     img.onload = () => {
       const tex = new THREE.Texture(img);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.center.set(0.5, 0.5); tex.rotation = 2 * Math.PI / 3; tex.needsUpdate = true;
-      for (const [cubeIdx, pid] of this._cubeFaces) {
-        if (pid === playerId && cubeIdx < this.cubes.length) {
-          const mats = this.cubes[cubeIdx].material;
+      tex.colorSpace = THREE.SRGBColorSpace; tex.center.set(0.5, 0.5); tex.rotation = 2 * Math.PI / 3; tex.needsUpdate = true;
+      for (const [ci, pid] of this._cubeFaces) {
+        if (pid === pId && ci < this.cubes.length) {
+          const mats = this.cubes[ci].material;
           mats[2] = new THREE.MeshLambertMaterial({ map: tex, color: 0xffffff, transparent: true, opacity: 1 });
         }
       }
     };
   }
 
-  setSelfFaceTex(texDataURL) {
-    if (this._myPlayerId) {
-      this._playerFaceTex.set(this._myPlayerId, texDataURL);
-      this._updateCubeFacesForPlayer(this._myPlayerId, texDataURL);
-    } else {
-      this._pendingSelfTex = texDataURL;
-    }
+  setSelfFaceTex(texURL) {
+    if (this._myPlayerId) { this._playerFaceTex.set(this._myPlayerId, texURL); this._updateCubeFacesForPlayer(this._myPlayerId, texURL); }
+    else this._pendingSelfTex = texURL;
   }
 
-  updatePlayerFaceId(oldId, newId) {
-    for (const [cubeIdx, pid] of this._cubeFaces) { if (pid === oldId) this._cubeFaces.set(cubeIdx, newId); }
-    for (const pf of this._playerFacesList) { if (pf && pf.id === oldId) pf.id = newId; }
+  updatePlayerFaceId(oid, nid) {
+    for (const [ci, pid] of this._cubeFaces) { if (pid === oid) this._cubeFaces.set(ci, nid); }
+    for (const pf of this._playerFacesList) { if (pf && pf.id === oid) pf.id = nid; }
   }
+
+  /* ================================================================
+   *  REMOTE STATE + EVENT-BASED JUMP/FALL
+   * ================================================================ */
 
   updateRemoteState(id, state) {
     const remote = this.remotes.get(id);
     if (!remote) return;
 
-    const isFalling = state.state === 'falling' || state.state === 'gameover';
-    if (isFalling && !remote._falling) { remote._falling = true; }
-    else if (!isFalling && remote._falling) { remote._falling = false; }
+    // Detect falling — start local sim
+    const isFall = state.state === 'falling' || state.state === 'gameover';
+    if (isFall && !remote.sim) {
+      this._startRemoteSim(remote, state);
+    }
+    // Respawn resets
+    if (!isFall && remote.sim) {
+      remote.sim = null;
+    }
 
-    // During local jump sim, don't chase the server — the sim will be corrected on land
-    if (remote._simJump) return;
-
+    // Store server position for correction
+    remote.serverPos = { x: state.pos.x, y: state.pos.y, z: state.pos.z, scaleY: state.scaleY };
     remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
     remote.targetRot.set(state.rot.x, state.rot.y, state.rot.z);
     remote.targetScaleY = state.scaleY;
   }
 
-  /** Event: remote player started a jump. Begin local simulation. */
+  /** Remote player started a jump — begin local simulation with their charge power. */
   remoteJumpStart(id, data) {
     const remote = this.remotes.get(id);
     if (!remote) return;
-    remote._simJump = true;
-    remote._simJumpVelX = data.chargePower * 1.3125;
-    remote._simJumpVelY = PHYSICS.jumpSpeedY + data.chargePower * 2.6;
-    remote._simJumpDir = data.dir;
-    remote._simJumpY = data.pos.y;
-    remote._simJumpX = data.pos.x;
-    remote._simJumpZ = data.pos.z;
-    remote._chargePower = data.chargePower;
-    remote._releaseScaleY = data.scaleY;
-    // Reset mesh to launch position
+    // Calculate exact velocities from charge power
+    const velX = data.chargePower * 1.3125;
+    const velY = PHYSICS.jumpSpeedY + data.chargePower * 2.6;
+    const dir   = data.dir || 'left';
+    const axis  = dir === 'left' ? 'x' : 'z';
+
+    remote.sim = {
+      type: 'jump',
+      pos: { x: data.pos.x, y: data.pos.y, z: data.pos.z },
+      velX, velY, axis, dir,
+      squash: data.scaleY || 1,
+    };
     remote.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
     remote.mesh.scale.set(2 - data.scaleY, data.scaleY, 2 - data.scaleY);
   }
 
-  /** Event: remote player landed. Snap position and end simulation. */
-  remoteJumpLand(id, data) {
-    const remote = this.remotes.get(id);
-    if (!remote) return;
-    remote._simJump = false;
-    remote.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
-    remote.mesh.scale.set(1, 1, 1);
+  /** Internal — detect falling and start local sim. */
+  _startRemoteSim(remote, state) {
+    const dx = state.pos.x - remote.mesh.position.x;
+    const dz = state.pos.z - remote.mesh.position.z;
+    const absDx = Math.abs(dx), absDz = Math.abs(dz);
+    const outAxis = absDz > absDx ? 'z' : 'x';
+    const outSign = (outAxis === 'x' ? dx : dz) >= 0 ? 1 : -1;
+
+    remote.sim = {
+      type: 'fall',
+      pos: { x: remote.mesh.position.x, y: remote.mesh.position.y, z: remote.mesh.position.z },
+      axis: outAxis, sign: outSign,
+    };
   }
 
-  lerpRemotes(dt) {
+  /* ================================================================
+   *  CALLED EVERY PHYSICS TICK
+   * ================================================================ */
+
+  tickRemotes() {
     if (this.remotes.size === 0) return;
-    const t = Math.min(0.6, dt * 30);
     for (const remote of this.remotes.values()) {
       const m = remote.mesh; if (!m) continue;
+      const sim = remote.sim;
+      const sp = remote.serverPos;
 
-      if (remote._falling) {
-        m.position.y = Math.max(GROUND_Y, m.position.y - PHYSICS.fallSpeed);
-        if (m.position.y <= GROUND_Y) remote._falling = false;
-        continue;
-      }
-
-      // ── Local jump simulation (event-driven) ──
-      if (remote._simJump) {
-        // Parabolic arc — use same constants as local game
-        const dir = remote._simJumpDir;
-        // Horizontal
-        if (dir === 'left') m.position.x -= remote._simJumpVelX;
-        else m.position.z -= remote._simJumpVelX;
-        // Vertical
-        remote._simJumpY += remote._simJumpVelY;
-        remote._simJumpVelY -= PHYSICS.gravity;
-        m.position.y = remote._simJumpY;
+      if (sim && sim.type === 'jump') {
+        // ── JUMP: parabolic arc (local sim) ──
+        m.position[sim.axis] -= sim.velX;
+        sim.pos.y += sim.velY;
+        sim.velY -= PHYSICS.gravity;
+        m.position.y = sim.pos.y;
 
         // Restore squash
         if (m.scale.y < 1) {
           m.scale.y = Math.min(1, m.scale.y + PHYSICS.releaseSpeed);
-          m.scale.x = 1 + (1 - m.scale.y);
-          m.scale.z = 1 + (1 - m.scale.y);
+          m.scale.x = m.scale.z = 1 + (1 - m.scale.y);
         }
-        continue;
+        // Gentle correction drift
+        if (sp) {
+          m.position.x += (sp.x - m.position.x) * 0.15;
+          m.position.z += (sp.z - m.position.z) * 0.15;
+        }
+      } else if (sim && sim.type === 'fall') {
+        // ── FALL: slide outward + vertical drop ──
+        m.position[sim.axis] += sim.sign * 0.06;
+        if (m.position.y > GROUND_Y) m.position.y -= PHYSICS.fallSpeed;
+        else { m.position.y = GROUND_Y; remote.sim = null; }
+      } else {
+        // ── IDLE/CHARGING: lerp to server ──
+        m.position.x += (remote.targetPos.x - m.position.x) * 0.4;
+        m.position.y += (remote.targetPos.y - m.position.y) * 0.4;
+        m.position.z += (remote.targetPos.z - m.position.z) * 0.4;
+        const sy = m.scale.y + (remote.targetScaleY - m.scale.y) * 0.4;
+        m.scale.y = sy;
+        m.scale.x = m.scale.z = 1 + (1 - sy);
       }
-
-      // ── Normal lerp (charging/idle/transitioning) ──
-      m.position.x += (remote.targetPos.x - m.position.x) * t;
-      m.position.y += (remote.targetPos.y - m.position.y) * t;
-      m.position.z += (remote.targetPos.z - m.position.z) * t;
-      const sy = m.scale.y + (remote.targetScaleY - m.scale.y) * t;
-      m.scale.y = sy;
-      const w = 1 + (1 - sy);
-      m.scale.x = m.scale.z = w;
     }
   }
 
@@ -274,80 +270,28 @@ export class World {
   }
 
   removeRemote(id) {
-    const remote = this.remotes.get(id);
-    if (!remote) return;
-    this._disposeMaterials(remote.mesh.material);
-    remote.mesh.geometry.dispose();
-    this.scene.remove(remote.mesh);
-    this.remotes.delete(id);
+    const remote = this.remotes.get(id); if (!remote) return;
+    this._disposeMaterials(remote.mesh.material); remote.mesh.geometry.dispose();
+    this.scene.remove(remote.mesh); this.remotes.delete(id);
   }
 
-  _makeCubeMats(opacity) {
-    const mat = new THREE.MeshLambertMaterial({ color: COLORS.cube, transparent: true, opacity });
-    return [mat.clone(), mat.clone(), mat.clone(), mat.clone(), mat.clone(), mat.clone()];
-  }
-
+  _makeCubeMats(o) { const m = new THREE.MeshLambertMaterial({ color: COLORS.cube, transparent: true, opacity: o }); return [m.clone(),m.clone(),m.clone(),m.clone(),m.clone(),m.clone()]; }
   _makeFinishMats() {
-    const dark = new THREE.MeshLambertMaterial({ color: 0x1a1a1a, transparent: true, opacity: 1 });
-    const white = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 1 });
-    const check = new THREE.MeshLambertMaterial({ color: 0x000000, transparent: true, opacity: 1 });
-    return [dark.clone(), check.clone(), white.clone(), dark.clone(), check.clone(), dark.clone()];
+    const d = new THREE.MeshLambertMaterial({ color: 0x1a1a1a, transparent: true, opacity: 1 });
+    const w = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 1 });
+    const c = new THREE.MeshLambertMaterial({ color: 0x000000, transparent: true, opacity: 1 });
+    return [d.clone(),c.clone(),w.clone(),d.clone(),c.clone(),d.clone()];
   }
-
-  _makeJumperMats() {
-    const color = new THREE.Color(this._jumperColor);
-    const side = new THREE.MeshLambertMaterial({ color });
-    const bottom = new THREE.MeshLambertMaterial({ color });
-    const top = this._jumperTex ? new THREE.MeshLambertMaterial({ map: this._jumperTex, color: 0xffffff }) : new THREE.MeshLambertMaterial({ color });
-    return [side, top, bottom];
-  }
-
+  _makeJumperMats() { const col = new THREE.Color(this._jumperColor); const s = new THREE.MeshLambertMaterial({ color: col }); const b = new THREE.MeshLambertMaterial({ color: col }); const t = this._jumperTex ? new THREE.MeshLambertMaterial({ map: this._jumperTex, color: 0xffffff }) : new THREE.MeshLambertMaterial({ color: col }); return [s,t,b]; }
   _makeNameSprite(name, colorHex, opacity) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256; canvas.height = 64;
-    const ctx = canvas.getContext('2d');
-    ctx.font = 'bold 42px Arial, sans-serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 6;
-    ctx.strokeText(name, 128, 32);
-    ctx.fillStyle = '#ffffff'; ctx.fillText(name, 128, 32);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
+    const cvs = document.createElement('canvas'); cvs.width = 256; cvs.height = 64; const ctx = cvs.getContext('2d');
+    ctx.font = 'bold 42px Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 6; ctx.strokeText(name, 128, 32); ctx.fillStyle = '#ffffff'; ctx.fillText(name, 128, 32);
+    const tex = new THREE.CanvasTexture(cvs); tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity, depthTest: false, depthWrite: false });
-    const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(2.6, 0.65, 1);
-    sprite.position.set(0, JUMPER.height + 0.5, 0);
-    return sprite;
+    const sprite = new THREE.Sprite(mat); sprite.scale.set(2.6, 0.65, 1); sprite.position.set(0, JUMPER.height + 0.5, 0); return sprite;
   }
-
-  _setGroupOpacity(mats, target) {
-    const arr = Array.isArray(mats) ? mats : [mats];
-    for (const m of arr) {
-      if (!m.transparent) m.transparent = true;
-      const cur = m.opacity;
-      if (Math.abs(target - cur) < 0.002) m.opacity = target;
-      else m.opacity += (target - cur) * 0.12;
-    }
-  }
-
+  _setGroupOpacity(mats, tgt) { const arr = Array.isArray(mats) ? mats : [mats]; for (const m of arr) { if (!m.transparent) m.transparent = true; const c = m.opacity; if (Math.abs(tgt-c) < 0.002) m.opacity = tgt; else m.opacity += (tgt-c)*0.12; } }
   _disposeMaterials(mats) { const arr = Array.isArray(mats) ? mats : [mats]; for (const m of arr) m.dispose(); }
-
-  _createJumper() {
-    if (this.jumper) { this._disposeMaterials(this.jumper.material); this.scene.remove(this.jumper); }
-    // Remove old name sprite from scene
-    if (this._nameSprite) { this.scene.remove(this._nameSprite); this._nameSprite = null; }
-    const r = JUMPER.width / 2;
-    const geo = new THREE.CylinderGeometry(r, r, JUMPER.height, 32);
-    geo.translate(0, JUMPER.height / 2, 0);
-    const mats = this._makeJumperMats();
-    this.jumper = new THREE.Mesh(geo, mats);
-    // Name sprite as independent scene object — not a child of the mesh (avoids scale inheritance)
-    if (this._jumperName) {
-      this._nameSprite = this._makeNameSprite(this._jumperName, '#ffffff', 1);
-      this.scene.add(this._nameSprite);
-    }
-    if (this.cubes.length) this.jumper.position.copy(this.cubes[0].position);
-    this.jumper.position.y = JUMPER.startY;
-    this.scene.add(this.jumper);
-  }
+  _createJumper() { if (this.jumper) { this._disposeMaterials(this.jumper.material); this.scene.remove(this.jumper); } if (this._nameSprite) { this.scene.remove(this._nameSprite); this._nameSprite = null; } const r = JUMPER.width / 2; const geo = new THREE.CylinderGeometry(r, r, JUMPER.height, 32); geo.translate(0, JUMPER.height / 2, 0); const mats = this._makeJumperMats(); this.jumper = new THREE.Mesh(geo, mats); if (this._jumperName) { this._nameSprite = this._makeNameSprite(this._jumperName, '#ffffff', 1); this.scene.add(this._nameSprite); } if (this.cubes.length) this.jumper.position.copy(this.cubes[0].position); this.jumper.position.y = JUMPER.startY; this.scene.add(this.jumper); }
 }

@@ -256,7 +256,7 @@ export class Game {
       if (this._respawnTimer > 0) {
         this._respawnTimer -= this._physStep;
         if (this._respawnTimer <= 0) { this._respawnTimer = 0; this._doRespawn(); }
-        this.world.lerpRemotes(this._physStep);
+        this.world.tickRemotes();
         this.world.updateNameSprite();
         break;
       }
@@ -272,7 +272,7 @@ export class Game {
         }
       }
       // Remote prediction + name sync: once per physics tick = 60Hz invariant
-      this.world.lerpRemotes(this._physStep);
+      this.world.tickRemotes();
       this.world.updateNameSprite();
     }
 
