@@ -310,16 +310,12 @@ export class World {
             this.cubes, this.directions, sim.startIdx,
           );
           if (result.location >= 1) {
-            // Landed on a forward cube — advance locally
+            // Landed on a forward cube — advance index locally
             remote._simIdx = sim.startIdx + result.location;
-            const cube = this.cubes[remote._simIdx];
-            if (cube) m.position.set(cube.position.x, JUMPER.startY, cube.position.z);
             remote.sim = null;
             remote._pendingServerSnap = true; // hold until server confirms
           } else if (result.location === -1) {
-            // Fell back on same cube — stay put
-            const cube = this.cubes[sim.startIdx];
-            if (cube) m.position.set(cube.position.x, JUMPER.startY, cube.position.z);
+            // Fell back on same cube — keep natural x/z
             remote.sim = null;
             remote._pendingServerSnap = true; // hold until server confirms
           } else {
