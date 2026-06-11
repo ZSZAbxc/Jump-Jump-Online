@@ -236,7 +236,7 @@ export class World {
       const sp = remote.serverPos;
 
       if (sim && sim.type === 'jump') {
-        // ── JUMP: parabolic arc (local sim) ──
+        // ── JUMP: parabolic arc (local sim, no server drift) ──
         m.position[sim.axis] -= sim.velX;
         sim.pos.y += sim.velY;
         sim.velY -= PHYSICS.gravity;
@@ -246,11 +246,6 @@ export class World {
         if (m.scale.y < 1) {
           m.scale.y = Math.min(1, m.scale.y + PHYSICS.releaseSpeed);
           m.scale.x = m.scale.z = 1 + (1 - m.scale.y);
-        }
-        // Gentle correction drift
-        if (sp) {
-          m.position.x += (sp.x - m.position.x) * 0.12;
-          m.position.z += (sp.z - m.position.z) * 0.12;
         }
         // Landing: sim stops when y drops back to start level
         if (sim.pos.y <= JUMPER.startY) {
