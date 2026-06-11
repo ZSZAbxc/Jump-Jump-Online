@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CUBE, JUMPER, COLORS, GROUND_Y, PHYSICS } from './constants.js';
+import { Physics } from './Physics.js';
 
 export class World {
   constructor(scene) {
@@ -114,7 +115,7 @@ export class World {
       const mesh = new THREE.Mesh(geo, mats);
       mesh.add(this._makeNameSprite(name || '', colorHex, 0.6));
       this.scene.add(mesh);
-      remote = { mesh, color: colorHex, name, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, sim: null, serverPos: null };
+      remote = { mesh, color: colorHex, name, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, sim: null, serverPos: null, _simIdx: 0, _serverChargePower: 0 };
       this.remotes.set(id, remote);
       if (texData) { this._playerFaceTex.set(id, texData); this._updateCubeFacesForPlayer(id, texData); }
       return remote;
@@ -187,6 +188,9 @@ export class World {
     if (state.chargePower !== undefined) {
       remote._serverChargePower = state.chargePower;
     }
+    // Track server cube index for landing correction
+    if (state.idx != null) remote._serverIdx = state.idx;
+    if (state.idx != null && !remote.sim) remote._simIdx = state.idx;
     // Don't kill jump or charging sim mid-flight — they self-destruct
     if (!isFall && remote.sim && remote.sim.type !== 'jump' && remote.sim.type !== 'charging') {
       remote.sim = null;
@@ -222,6 +226,7 @@ export class World {
       pos: { x: data.pos.x, y: data.pos.y, z: data.pos.z },
       velX, velY, axis, dir,
       squash: data.scaleY || 1,
+      startIdx: remote._simIdx,
     };
     remote.mesh.position.set(data.pos.x, data.pos.y, data.pos.z);
     remote.mesh.scale.set(2 - data.scaleY, data.scaleY, 2 - data.scaleY);
@@ -262,7 +267,6 @@ export class World {
     for (const remote of this.remotes.values()) {
       const m = remote.mesh; if (!m) continue;
       const sim = remote.sim;
-      const sp = remote.serverPos;
 
       if (sim && sim.type === 'charging') {
         // ── CHARGING: local squash sim (same physics as local player) ──
@@ -291,12 +295,36 @@ export class World {
           m.scale.y = Math.min(1, m.scale.y + PHYSICS.releaseSpeed);
           m.scale.x = m.scale.z = 1 + (1 - m.scale.y);
         }
-        // Landing: sim stops when y drops back to start level
+        // Landing: local checkLanding determines outcome (all clients share same cubes)
         if (sim.pos.y <= JUMPER.startY) {
-          remote.sim = null;
           m.position.y = JUMPER.startY;
           m.scale.set(1, 1, 1);
-          remote._justLanded = true; // next frame: hard-snap to server
+          const result = Physics.checkLanding(
+            m.position.x, m.position.z,
+            this.cubes, this.directions, sim.startIdx,
+          );
+          if (result.location >= 1) {
+            // Landed on a forward cube — advance locally
+            remote._simIdx = sim.startIdx + result.location;
+            const cube = this.cubes[remote._simIdx];
+            if (cube) m.position.set(cube.position.x, JUMPER.startY, cube.position.z);
+            remote.sim = null;
+          } else if (result.location === -1) {
+            // Fell back on same cube — stay put
+            const cube = this.cubes[sim.startIdx];
+            if (cube) m.position.set(cube.position.x, JUMPER.startY, cube.position.z);
+            remote.sim = null;
+          } else {
+            // Missed everything — start local fall sim
+            const dx = m.position.x - (this.cubes[sim.startIdx]?.position.x || 0);
+            const dz = m.position.z - (this.cubes[sim.startIdx]?.position.z || 0);
+            const outAxis = Math.abs(dz) > Math.abs(dx) ? 'z' : 'x';
+            const outSign = (outAxis === 'x' ? dx : dz) >= 0 ? 1 : -1;
+            remote.sim = {
+              type: 'fall',
+              axis: outAxis, sign: outSign,
+            };
+          }
         }
       } else if (sim && sim.type === 'fall') {
         // ── FALL: slide outward + vertical drop ──
@@ -309,15 +337,9 @@ export class World {
           remote._awaitingRespawn = true;
         }
       } else {
-        // ── IDLE/CHARGING: handle landing snap or lerp ──
+        // ── IDLE / CHARGING (no sim): hold during respawn wait, otherwise lerp ──
         if (remote._awaitingRespawn) {
-          // Hold at last known position until server sends respawn
-          // (no-op — position stays where fall sim left it)
-        } else if (remote._justLanded || remote._justFell) {
-          m.position.set(remote.targetPos.x, remote.targetPos.y, remote.targetPos.z);
-          m.scale.set(1, 1, 1);
-          remote._justLanded = false;
-          remote._justFell = false;
+          // Hold — server will send respawn position and hard-snap in updateRemoteState
         } else {
           m.position.x += (remote.targetPos.x - m.position.x) * 0.4;
           m.position.y += (remote.targetPos.y - m.position.y) * 0.4;
