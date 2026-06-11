@@ -358,7 +358,7 @@ export class Game {
     this._hasLaunched = false;
     this.state = GAME_STATES.JUMPING;
     this._chargePower = 0;
-    this.world.jumper.scale.y = 1;
+    this.world.jumper.scale.set(1, 1, 1);
   }
 
   /* ================================================================
@@ -370,6 +370,10 @@ export class Game {
     if (j.scale.y > 0.02) {
       const squashRate = PHYSICS.compressSpeed + this._chargePower * 0.03;
       j.scale.y -= squashRate;
+      // Widen proportionally: Y shrinks → X and Z grow
+      const widen = 1 + (1 - j.scale.y);
+      j.scale.x = widen;
+      j.scale.z = widen;
       this._chargePower += PHYSICS.chargeSpeed;
     }
   }
@@ -379,7 +383,13 @@ export class Game {
     const dir = this.world.currentDir;
     const { velY } = Physics.jumpTrajectory(j.position, this._jumpVelX, this._jumpVelY, dir);
     this._jumpVelY = velY;
-    if (j.scale.y < 1) j.scale.y = Math.min(1, j.scale.y + PHYSICS.releaseSpeed);
+    if (j.scale.y < 1) {
+      j.scale.y = Math.min(1, j.scale.y + PHYSICS.releaseSpeed);
+      // Restore width proportionally
+      const widen = 1 + (1 - j.scale.y);
+      j.scale.x = widen;
+      j.scale.z = widen;
+    }
     if (!this._hasLaunched && j.position.y > JUMPER.startY) this._hasLaunched = true;
     if (this._hasLaunched && j.position.y <= JUMPER.startY) {
       j.position.y = JUMPER.startY;
