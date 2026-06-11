@@ -461,6 +461,8 @@ export class Game {
       this._respawnIdx = this._respawnIdx + 1;
       this._transitionSteps = steps;
       this.network?.sendIdx(this.world.currentIdx);
+      // Force re-sync after landing — corrects remote simulation position
+      this._syncTimer = 999;
 
       if (this._mode === 'race' && this.world.currentIdx === this._modeParam) {
         this._finished = true; this.input.disable();
@@ -471,6 +473,7 @@ export class Game {
     } else if (result.location === -1) {
       this._respawnIdx = this.world.currentIdx;
       this.state = GAME_STATES.IDLE;
+      this._syncTimer = 999; // force re-sync after landing
     } else {
       this._startFall();
     }
