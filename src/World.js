@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { CUBE, JUMPER, COLORS, GROUND_Y, PHYSICS } from './constants.js';
 
 export class World {
@@ -113,7 +114,7 @@ export class World {
       const mesh = new THREE.Mesh(geo, mats);
       mesh.add(this._makeNameSprite(name || '', colorHex, 0.6));
       this.scene.add(mesh);
-      remote = { mesh, color: colorHex, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, sim: null, serverPos: null };
+      remote = { mesh, color: colorHex, name, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, sim: null, serverPos: null };
       this.remotes.set(id, remote);
       if (texData) { this._playerFaceTex.set(id, texData); this._updateCubeFacesForPlayer(id, texData); }
       return remote;
