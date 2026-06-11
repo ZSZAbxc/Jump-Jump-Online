@@ -59,7 +59,8 @@ if (IS_PROD) {
 const io = new Server(httpServer, {
   cors: { origin: '*' },
   pingInterval: 3000,
-  transports: ['websocket'],
+  pingTimeout: 10000,
+  transports: ['websocket', 'polling'],
   allowEIO3: false,
   connectTimeout: 15000,
 });

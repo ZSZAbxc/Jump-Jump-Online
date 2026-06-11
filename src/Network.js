@@ -17,6 +17,8 @@ export class Network {
       this._persistentId = 'P' + Math.random().toString(36).slice(2, 10).toUpperCase();
       localStorage.setItem('jumpPlayerId', this._persistentId);
     }
+    // Store room info for auto-reconnect
+    this._lastRoomId = null;
 
     this.onRoomUpdate = null;
     this.onGameStart = null;
@@ -35,10 +37,26 @@ export class Network {
 
   connect() {
     return new Promise((resolve, reject) => {
-      this.socket = io(this.url, { transports: ['websocket'], timeout: 20000, upgrade: false });
+      this.socket = io(this.url, {
+        transports: ['websocket', 'polling'],
+        timeout: 20000,
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: Infinity,
+      });
       this.socket.on('connect', () => resolve());
       this.socket.on('connect_error', (err) => {
         reject(new Error(`无法连接服务器 (${err.message})，请确保 npm run dev 正在运行`));
+      });
+      // Auto-reconnect: if we were in a started room, try to rejoin
+      this.socket.on('disconnect', () => {
+        this._lastRoomId = this.roomId;
+      });
+      this.socket.io.on('reconnect', () => {
+        if (this._lastRoomId && this._persistentId) {
+          this.reconnectRoom(this._lastRoomId);
+        }
       });
       this._bind();
     });
@@ -47,6 +65,7 @@ export class Network {
   _bind() {
     this.socket.on('room_joined', ({ roomId, playerId, modeConfig }) => {
       this.roomId = roomId;
+      this._lastRoomId = roomId;
       this.playerId = playerId;
       this._joinedModeConfig = modeConfig;
     });
