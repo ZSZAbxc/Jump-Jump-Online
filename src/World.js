@@ -184,6 +184,12 @@ export class World {
         remote.mesh.scale.set(1, 1, 1);
       }
     }
+    // After local jump sim finishes, wait for server landing packet then align
+    if (remote._pendingServerSnap && state.pos && !isFall && state.state !== 'jumping') {
+      remote._pendingServerSnap = false;
+      remote.mesh.position.set(state.pos.x, state.pos.y, state.pos.z);
+      remote._simIdx = state.idx ?? remote._simIdx;
+    }
     // Update charge power cap from server
     if (state.chargePower !== undefined) {
       remote._serverChargePower = state.chargePower;
@@ -309,11 +315,13 @@ export class World {
             const cube = this.cubes[remote._simIdx];
             if (cube) m.position.set(cube.position.x, JUMPER.startY, cube.position.z);
             remote.sim = null;
+            remote._pendingServerSnap = true; // hold until server confirms
           } else if (result.location === -1) {
             // Fell back on same cube — stay put
             const cube = this.cubes[sim.startIdx];
             if (cube) m.position.set(cube.position.x, JUMPER.startY, cube.position.z);
             remote.sim = null;
+            remote._pendingServerSnap = true; // hold until server confirms
           } else {
             // Missed everything — start local fall sim
             const dx = m.position.x - (this.cubes[sim.startIdx]?.position.x || 0);
@@ -337,9 +345,9 @@ export class World {
           remote._awaitingRespawn = true;
         }
       } else {
-        // ── IDLE / CHARGING (no sim): hold during respawn wait, otherwise lerp ──
-        if (remote._awaitingRespawn) {
-          // Hold — server will send respawn position and hard-snap in updateRemoteState
+        // ── IDLE / CHARGING (no sim): hold after local sim finishes, otherwise lerp ──
+        if (remote._awaitingRespawn || remote._pendingServerSnap) {
+          // Hold — server will send position and hard-snap in updateRemoteState
         } else {
           m.position.x += (remote.targetPos.x - m.position.x) * 0.4;
           m.position.y += (remote.targetPos.y - m.position.y) * 0.4;
