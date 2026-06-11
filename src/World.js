@@ -127,7 +127,7 @@ export class World {
       const mesh = new THREE.Mesh(geo, mats);
       mesh.add(this._makeNameSprite(name || '', colorHex, 0.6));
       this.scene.add(mesh);
-      remote = { mesh, color: colorHex, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1 };
+      remote = { mesh, color: colorHex, targetPos: new THREE.Vector3(), targetRot: new THREE.Vector3(), targetScaleY: 1, _remoteState: 'idle' };
       this.remotes.set(id, remote);
       if (texData) { this._playerFaceTex.set(id, texData); this._updateCubeFacesForPlayer(id, texData); }
       return remote;
@@ -183,6 +183,7 @@ export class World {
     const remote = this.remotes.get(id);
     if (!remote) return;
 
+    const prevState = remote._remoteState;
     const isFalling = state.state === 'falling' || state.state === 'gameover';
     if (isFalling && !remote._falling) {
       remote._falling = true;
@@ -194,41 +195,109 @@ export class World {
       remote._fallOutSign = (remote._fallMoveAxis === 'x' ? dx : dz) >= 0 ? 1 : -1;
       remote._fallTimer = 0;
     } else if (!isFalling && remote._falling) {
-      // Respawned or recovered — resume normal lerp
       remote._falling = false;
     }
 
-    remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
+    // ── Client-side jump prediction ──────────────────────────────
+    // When a remote player starts charging or jumping, start local
+    // simulation so the animation runs at 60fps instead of 30Hz lerp.
+    const newState = state.state;
+    if (newState === 'charging' && prevState !== 'charging') {
+      // Start local charge animation
+      remote._simCharge = true;
+      remote._simChargePower = 0;
+    } else if (newState === 'jumping' && (prevState === 'charging' || prevState === 'idle')) {
+      // Start local jump simulation — compute initial velocities from the
+      // position delta between this sync and the last known position.
+      const dx = state.pos.x - remote.targetPos.x;
+      const dy = state.pos.y - remote.targetPos.y;
+      const dz = state.pos.z - remote.targetPos.z;
+      remote._simJump = true;
+      remote._simJumpVelY = Math.max(dy * 60, PHYSICS.jumpSpeedY); // approximate
+      remote._simJumpVelX = Math.max(Math.abs(dx * 60), Math.abs(dz * 60)) || PHYSICS.jumpSpeedX;
+      remote._simJumpDir = Math.abs(dz) > Math.abs(dx) ? 'right' : 'left';
+      remote._simJumpY = state.pos.y;
+      // Start from remote's actual position
+      remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
+    } else if (newState !== 'charging' && newState !== 'jumping') {
+      remote._simCharge = false;
+      remote._simJump = false;
+      // For idle/transitioning, snap to synced position smoothly
+      remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
+    }
+
+    // Always store server target for correction
+    remote._serverPos = { x: state.pos.x, y: state.pos.y, z: state.pos.z };
     remote.targetRot.set(state.rot.x, state.rot.y, state.rot.z);
     remote.targetScaleY = state.scaleY;
-    remote._remoteState = state.state;
+    remote._remoteState = newState;
   }
 
   lerpRemotes(dt) {
     if (this.remotes.size === 0) return;
-    const t = 0.4;
+    const smoothT = 0.2; // gentle correction toward server position
     for (const remote of this.remotes.values()) {
       const m = remote.mesh; if (!m) continue;
 
+      // ── Local fall animation ──
       if (remote._falling) {
-        // ── Local fall animation — slide outward + drop ──
         remote._fallTimer += dt;
         if (m.position.y > GROUND_Y) {
-          // Slide outward
           m.position[remote._fallMoveAxis] += remote._fallOutSign * 0.06;
-          // Drop
           m.position.y -= PHYSICS.fallSpeed;
         } else {
           m.position.y = GROUND_Y;
-          remote._falling = false; // animation complete
+          remote._falling = false;
         }
-      } else {
-        // ── Normal lerp ──
-        m.position.x += (remote.targetPos.x - m.position.x) * t;
-        m.position.y += (remote.targetPos.y - m.position.y) * t;
-        m.position.z += (remote.targetPos.z - m.position.z) * t;
-        m.scale.y += (remote.targetScaleY - m.scale.y) * t;
+        continue;
       }
+
+      // ── Local charge simulation ──
+      if (remote._simCharge) {
+        if (m.scale.y > 0.02) {
+          const squashRate = PHYSICS.compressSpeed + remote._simChargePower * 0.03;
+          m.scale.y -= squashRate;
+          remote._simChargePower += PHYSICS.chargeSpeed;
+          m.scale.x = 1 + (1 - m.scale.y);
+          m.scale.z = 1 + (1 - m.scale.y);
+        }
+        // Gently correct position toward server
+        if (remote._serverPos) {
+          m.position.x += (remote._serverPos.x - m.position.x) * smoothT;
+          m.position.z += (remote._serverPos.z - m.position.z) * smoothT;
+        }
+        continue;
+      }
+
+      // ── Local jump simulation ──
+      if (remote._simJump) {
+        // Apply parabolic trajectory locally
+        const moveAxis = remote._simJumpDir === 'left' ? 'x' : 'z';
+        m.position[moveAxis] -= remote._simJumpVelX / 60;
+        remote._simJumpY += remote._simJumpVelY / 60;
+        remote._simJumpVelY -= PHYSICS.gravity;
+        m.position.y = remote._simJumpY;
+
+        // Restore squash
+        if (m.scale.y < 1) {
+          m.scale.y = Math.min(1, m.scale.y + PHYSICS.releaseSpeed);
+          m.scale.x = 1 + (1 - m.scale.y);
+          m.scale.z = 1 + (1 - m.scale.y);
+        }
+
+        // Gently correct toward server position for drift
+        if (remote._serverPos) {
+          m.position.x += (remote._serverPos.x - m.position.x) * smoothT;
+          m.position.z += (remote._serverPos.z - m.position.z) * smoothT;
+        }
+        continue;
+      }
+
+      // ── Normal lerp (idle/transitioning) ──
+      m.position.x += (remote.targetPos.x - m.position.x) * 0.4;
+      m.position.y += (remote.targetPos.y - m.position.y) * 0.4;
+      m.position.z += (remote.targetPos.z - m.position.z) * 0.4;
+      m.scale.y += (remote.targetScaleY - m.scale.y) * 0.4;
     }
   }
 
