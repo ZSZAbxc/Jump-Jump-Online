@@ -272,7 +272,7 @@ export class World {
     const canvas = document.createElement('canvas');
     canvas.width = 256; canvas.height = 64;
     const ctx = canvas.getContext('2d');
-    ctx.font = 'bold 36px Arial, sans-serif';
+    ctx.font = 'bold 42px Arial, sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = 6;
     ctx.strokeText(name, 128, 32);
@@ -281,7 +281,7 @@ export class World {
     tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity, depthTest: false, depthWrite: false });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(2.2, 0.55, 1);
+    sprite.scale.set(2.6, 0.65, 1);
     sprite.position.set(0, JUMPER.height + 0.5, 0);
     return sprite;
   }
