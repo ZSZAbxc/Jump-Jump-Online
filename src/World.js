@@ -163,6 +163,7 @@ export class World {
    * ================================================================ */
 
   updateRemoteState(id, state) {
+    if (!state || !state.pos) return;
     const remote = this.remotes.get(id);
     if (!remote) return;
 
