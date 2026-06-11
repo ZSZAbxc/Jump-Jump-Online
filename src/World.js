@@ -243,15 +243,13 @@ export class World {
         }
         // Gentle correction drift
         if (sp) {
-          m.position.x += (sp.x - m.position.x) * 0.15;
-          m.position.z += (sp.z - m.position.z) * 0.15;
+          m.position.x += (sp.x - m.position.x) * 0.12;
+          m.position.z += (sp.z - m.position.z) * 0.12;
         }
-        // Landing detection: snap to last known server position when below start Y
+        // Landing: sim stops when y drops back to start level
         if (sim.pos.y <= JUMPER.startY) {
-          remote.sim = null; // stop local sim
-          if (sp) {
-            m.position.set(sp.x, JUMPER.startY, sp.z);
-          }
+          remote.sim = null;
+          m.position.y = JUMPER.startY;
           m.scale.set(1, 1, 1);
         }
       } else if (sim && sim.type === 'fall') {
