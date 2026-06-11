@@ -193,9 +193,13 @@ export class World {
     // Track server cube index for landing correction
     if (state.idx != null) remote._serverIdx = state.idx;
     if (state.idx != null && !remote.sim) remote._simIdx = state.idx;
-    // Don't kill jump sim mid-flight — it self-destructs on landing
-    if (!isFall && remote.sim && remote.sim.type !== 'jump') {
+    // Don't kill jump or charging sim mid-flight — they self-destruct
+    if (!isFall && remote.sim && remote.sim.type !== 'jump' && remote.sim.type !== 'charging') {
       remote.sim = null;
+    }
+    // Start local charging sim when remote player begins charging (one-shot trigger)
+    if (state.state === 'charging' && !remote.sim) {
+      remote.sim = { type: 'charging', power: 0 };
     }
 
     // Store server position for correction — guard against empty state
@@ -258,7 +262,19 @@ export class World {
       const m = remote.mesh; if (!m) continue;
       const sim = remote.sim;
 
-      if (sim && sim.type === 'jump') {
+      if (sim && sim.type === 'charging') {
+        // ── CHARGING: pure local squash (same physics as local player) ──
+        if (m.scale.y > 0.02) {
+          const rate = PHYSICS.compressSpeed + sim.power * 0.03;
+          m.scale.y = Math.max(0.02, m.scale.y - rate);
+          const w = 1 + (1 - m.scale.y);
+          m.scale.x = w; m.scale.z = w;
+          sim.power += PHYSICS.chargeSpeed;
+        }
+        // Gentle drift to server position (charging syncs at 30Hz)
+        m.position.x += (remote.targetPos.x - m.position.x) * 0.2;
+        m.position.z += (remote.targetPos.z - m.position.z) * 0.2;
+      } else if (sim && sim.type === 'jump') {
         // ── JUMP: parabolic arc (local sim, no server drift) ──
         m.position[sim.axis] -= sim.velX;
         sim.pos.y += sim.velY;

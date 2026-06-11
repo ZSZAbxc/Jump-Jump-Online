@@ -382,6 +382,8 @@ export class Game {
     this.state = GAME_STATES.CHARGING;
     this._chargePower = 0;
     if (this.audioManager) this._chargeHandle = this.audioManager.playCharge();
+    // Force sync so remotes start local charging sim immediately
+    this._syncTimer = 999;
   }
 
   _onRelease() {
