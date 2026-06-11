@@ -169,6 +169,7 @@ export class Game {
 
     if (!this._running) { this._running = true; this._loop(); }
     this.network?.sendIdx(0);
+    this.world.updateNameSprite();
   }
 
   restart() {
@@ -255,6 +256,7 @@ export class Game {
         this.cameraCtrl.updateTarget(this.world.cubes, this.world.currentIdx);
         this.cameraCtrl.update();
         this.world.lerpRemotes(1 / 60);
+        this.world.updateNameSprite();
         this.renderer.render();
         return;
       }
@@ -269,6 +271,7 @@ export class Game {
     this._syncState();
     this._updateModeUI();
     this.world.lerpRemotes(1 / 60);
+    this.world.updateNameSprite();
     this.renderer.render();
   }
 
@@ -513,6 +516,7 @@ export class Game {
     this._chargePower = 0; this._fallEnded = false;
     this.input.enable(); this._hasLaunched = false;
     this.cameraCtrl.updateTarget(this.world.cubes, this._respawnIdx);
+    this.world.updateNameSprite();
   }
 
   _updateModeUI() {

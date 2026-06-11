@@ -232,6 +232,13 @@ export class World {
     }
   }
 
+  /** Call every frame — sync name sprite to jumper's world position. */
+  updateNameSprite() {
+    if (!this._nameSprite || !this.jumper) return;
+    this._nameSprite.position.copy(this.jumper.position);
+    this._nameSprite.position.y += JUMPER.height + 0.6;
+  }
+
   removeRemote(id) {
     const remote = this.remotes.get(id);
     if (!remote) return;
@@ -293,12 +300,18 @@ export class World {
 
   _createJumper() {
     if (this.jumper) { this._disposeMaterials(this.jumper.material); this.scene.remove(this.jumper); }
+    // Remove old name sprite from scene
+    if (this._nameSprite) { this.scene.remove(this._nameSprite); this._nameSprite = null; }
     const r = JUMPER.width / 2;
     const geo = new THREE.CylinderGeometry(r, r, JUMPER.height, 32);
     geo.translate(0, JUMPER.height / 2, 0);
     const mats = this._makeJumperMats();
     this.jumper = new THREE.Mesh(geo, mats);
-    if (this._jumperName) this.jumper.add(this._makeNameSprite(this._jumperName, '#ffffff', 1));
+    // Name sprite as independent scene object — not a child of the mesh (avoids scale inheritance)
+    if (this._jumperName) {
+      this._nameSprite = this._makeNameSprite(this._jumperName, '#ffffff', 1);
+      this.scene.add(this._nameSprite);
+    }
     if (this.cubes.length) this.jumper.position.copy(this.cubes[0].position);
     this.jumper.position.y = JUMPER.startY;
     this.scene.add(this.jumper);
