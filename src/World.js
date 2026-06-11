@@ -176,17 +176,22 @@ export class World {
       remote.sim = null;
     }
 
-    // Store server position for correction
-    remote.serverPos = { x: state.pos.x, y: state.pos.y, z: state.pos.z, scaleY: state.scaleY };
-    remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
-    remote.targetRot.set(state.rot.x, state.rot.y, state.rot.z);
-    remote.targetScaleY = state.scaleY;
+    // Store server position for correction — guard against empty state
+    if (state.pos) {
+      remote.serverPos = { x: state.pos.x, y: state.pos.y, z: state.pos.z, scaleY: state.scaleY };
+      remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
+    }
+    if (state.rot) {
+      remote.targetRot.set(state.rot.x, state.rot.y, state.rot.z);
+    }
+    if (state.scaleY != null) remote.targetScaleY = state.scaleY;
   }
 
   /** Remote player started a jump — begin local simulation with their charge power. */
   remoteJumpStart(id, data) {
     const remote = this.remotes.get(id);
     if (!remote) return;
+    if (!data || !data.pos) return;
     // Calculate exact velocities from charge power
     const velX = data.chargePower * 1.3125;
     const velY = PHYSICS.jumpSpeedY + data.chargePower * 2.6;
@@ -205,6 +210,7 @@ export class World {
 
   /** Internal — detect falling and start local sim. */
   _startRemoteSim(remote, state) {
+    if (!state || !state.pos) return;
     const dx = state.pos.x - remote.mesh.position.x;
     const dz = state.pos.z - remote.mesh.position.z;
     const absDx = Math.abs(dx), absDz = Math.abs(dz);
