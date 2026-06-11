@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CUBE, JUMPER, COLORS } from './constants.js';
+import { CUBE, JUMPER, COLORS, GROUND_Y, PHYSICS } from './constants.js';
 
 export class World {
   constructor(scene) {
@@ -182,9 +182,26 @@ export class World {
   updateRemoteState(id, state) {
     const remote = this.remotes.get(id);
     if (!remote) return;
+
+    const isFalling = state.state === 'falling' || state.state === 'gameover';
+    if (isFalling && !remote._falling) {
+      remote._falling = true;
+      remote._fallStartY = remote.targetPos.y;
+      const dx = state.pos.x - remote.targetPos.x;
+      const dz = state.pos.z - remote.targetPos.z;
+      const absDx = Math.abs(dx), absDz = Math.abs(dz);
+      remote._fallMoveAxis = absDz > absDx ? 'z' : 'x';
+      remote._fallOutSign = (remote._fallMoveAxis === 'x' ? dx : dz) >= 0 ? 1 : -1;
+      remote._fallTimer = 0;
+    } else if (!isFalling && remote._falling) {
+      // Respawned or recovered — resume normal lerp
+      remote._falling = false;
+    }
+
     remote.targetPos.set(state.pos.x, state.pos.y, state.pos.z);
     remote.targetRot.set(state.rot.x, state.rot.y, state.rot.z);
     remote.targetScaleY = state.scaleY;
+    remote._remoteState = state.state;
   }
 
   lerpRemotes(dt) {
@@ -192,10 +209,26 @@ export class World {
     const t = 0.4;
     for (const remote of this.remotes.values()) {
       const m = remote.mesh; if (!m) continue;
-      m.position.x += (remote.targetPos.x - m.position.x) * t;
-      m.position.y += (remote.targetPos.y - m.position.y) * t;
-      m.position.z += (remote.targetPos.z - m.position.z) * t;
-      m.scale.y += (remote.targetScaleY - m.scale.y) * t;
+
+      if (remote._falling) {
+        // ── Local fall animation — slide outward + drop ──
+        remote._fallTimer += dt;
+        if (m.position.y > GROUND_Y) {
+          // Slide outward
+          m.position[remote._fallMoveAxis] += remote._fallOutSign * 0.06;
+          // Drop
+          m.position.y -= PHYSICS.fallSpeed;
+        } else {
+          m.position.y = GROUND_Y;
+          remote._falling = false; // animation complete
+        }
+      } else {
+        // ── Normal lerp ──
+        m.position.x += (remote.targetPos.x - m.position.x) * t;
+        m.position.y += (remote.targetPos.y - m.position.y) * t;
+        m.position.z += (remote.targetPos.z - m.position.z) * t;
+        m.scale.y += (remote.targetScaleY - m.scale.y) * t;
+      }
     }
   }
 
