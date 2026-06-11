@@ -132,11 +132,21 @@ io.on('connection', (socket) => {
     return { cubes, dirs, players, faceAssignments, playerFaces };
   }
 
+  function dedupName(room, name) {
+    const base = name || '玩家';
+    const existing = new Set();
+    for (const [, p] of room.players) existing.add(p.name);
+    if (!existing.has(base)) return base;
+    let i = 1;
+    while (existing.has(`${base}(${i})`)) i++;
+    return `${base}(${i})`;
+  }
+
   socket.on('create_room', ({ color, name, playerId }) => {
     leaveRoom();
     const room = rooms.get(createRoom());
     room.hostId = socket.id;
-    room.players.set(socket.id, { playerId, color, name: name || '玩家', ready: true, alive: true, score: 0, idx: 0, ping: 0, offline: false });
+    room.players.set(socket.id, { playerId, color, name: dedupName(room, name), ready: true, alive: true, score: 0, idx: 0, ping: 0, offline: false });
     socket.join(room.id); myRoom = room.id;
     socket.emit('room_joined', { roomId: room.id, playerId: socket.id, modeConfig: { mode: room.mode, param: room.modeParam, randomFaces: room.randomFaces } });
     broadcastRoom(room);
@@ -147,7 +157,7 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomId);
     if (!room) { socket.emit('error', '房间不存在'); return; }
     if (room.started) { socket.emit('error', '游戏已开始'); return; }
-    room.players.set(socket.id, { playerId, color, name: name || '玩家', ready: false, alive: true, score: 0, idx: 0, ping: 0, offline: false });
+    room.players.set(socket.id, { playerId, color, name: dedupName(room, name), ready: false, alive: true, score: 0, idx: 0, ping: 0, offline: false });
     socket.join(roomId); myRoom = roomId;
     socket.emit('room_joined', { roomId, playerId: socket.id, modeConfig: { mode: room.mode, param: room.modeParam, randomFaces: room.randomFaces } });
     broadcastRoom(room);
@@ -250,6 +260,57 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
+  // ── End-game vote ─────────────────────────────────────────────
+  socket.on('end_game_vote', () => {
+    const room = rooms.get(myRoom);
+    if (!room || !room.started) return;
+    if (room._vote) return; // already voting
+    const p = room.players.get(socket.id);
+    if (!p) return;
+
+    room._vote = {
+      initiatorId: socket.id,
+      initiatorName: p.name,
+      votes: new Map([[socket.id, true]]),
+      total: room.players.size,
+    };
+
+    const voterIds = [...room._vote.votes.keys()];
+    const agreed = voterIds.length;
+    const total = room._vote.total;
+    io.to(myRoom).emit('end_game_vote_start', { initiatorName: p.name, voterIds, total, agreed });
+    socket.emit('end_game_vote_start', { initiatorName: p.name, voterIds, total, agreed });
+  });
+
+  socket.on('end_game_vote_response', ({ agree }) => {
+    const room = rooms.get(myRoom);
+    if (!room || !room.started || !room._vote) return;
+    room._vote.votes.set(socket.id, agree);
+    const total = room._vote.total;
+
+    if (!agree) {
+      io.to(myRoom).emit('end_game_vote_end', { passed: false, reason: '有人拒绝' });
+      room._vote = null;
+      return;
+    }
+
+    const agreed = [...room._vote.votes.values()].filter(v => v).length;
+    const voterIds = [...room._vote.votes.keys()];
+    io.to(myRoom).emit('end_game_vote_update', { agreed, total, voterIds });
+
+    if (agreed >= total) {
+      // Unanimous — end game
+      room.started = false;
+      io.to(myRoom).emit('end_game_vote_end', { passed: true, reason: '全票通过' });
+      for (const [id, pl] of room.players) {
+        pl.ready = (id === room.hostId);
+        pl.alive = true; pl.score = 0; pl.idx = 0;
+      }
+      room._vote = null;
+      broadcastRoom(room);
+    }
+  });
+
   socket.on('disconnect', () => {
     const room = rooms.get(myRoom);
     if (!room || !room.started) { leaveRoom(); console.log(`[dc] ${socket.id}`); return; }
@@ -257,10 +318,23 @@ io.on('connection', (socket) => {
     if (!p) { myRoom = null; return; }
     p.offline = true;
     const roomId = myRoom;
+    // If the disconnecting player is the vote initiator, cancel the vote
+    if (room._vote && room._vote.initiatorId === socket.id) {
+      io.to(roomId).emit('end_game_vote_end', { passed: false, reason: '发起者离线' });
+      room._vote = null;
+    }
     socket.to(roomId).emit('player_offline', { socketId: socket.id });
     broadcastRoom(room);
     p._disconnectTimer = setTimeout(() => {
       const r = rooms.get(roomId); if (!r || !r.players.has(socket.id)) return;
+      // Clean vote entry if there's an active vote
+      if (r._vote) {
+        r._vote.votes.delete(socket.id);
+        const total = r._vote.total;
+        const agreed = [...r._vote.votes.values()].filter(v => v).length;
+        const voterIds = [...r._vote.votes.keys()];
+        io.to(roomId).emit('end_game_vote_update', { agreed, total, voterIds });
+      }
       const wasHost = r.hostId === socket.id;
       r.players.delete(socket.id); socket.leave(roomId);
       if (r.players.size === 0) rooms.delete(roomId);

@@ -12,6 +12,8 @@ export class UI {
     this._createWaitingScreen();
     this._createGameInfoBar();
     this._createLatencyIndicator();
+    this._createEndGameButton();
+    this._createEndGameDialog();
     this._createRaceBar();
     this._createTimedLeaderboard();
 
@@ -100,6 +102,78 @@ export class UI {
   hideLatency() {
     if (this._latencyEl) this._latencyEl.style.display = 'none';
   }
+
+  /* ================================================================
+   *  END-GAME BUTTON + VOTE DIALOG
+   * ================================================================ */
+
+  _createEndGameButton() {
+    this._endBtn = document.createElement('button');
+    this._endBtn.textContent = '结束本局';
+    this._endBtn.style.cssText =
+      'display:none;position:fixed;top:8px;right:8px;' +
+      'background:rgba(0,0,0,0.4);color:#fff;border:1px solid rgba(255,255,255,0.3);' +
+      'border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;z-index:15;';
+    document.body.appendChild(this._endBtn);
+  }
+
+  showEndGameButton() { if (this._endBtn) this._endBtn.style.display = 'block'; }
+  hideEndGameButton() { if (this._endBtn) this._endBtn.style.display = 'none'; }
+  onEndGameClick(cb) { if (this._endBtn) this._endBtn.addEventListener('click', cb); }
+
+  _createEndGameDialog() {
+    this._endDialog = document.createElement('div');
+    this._endDialog.style.cssText =
+      'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);' +
+      'flex-direction:column;align-items:center;justify-content:center;z-index:25;';
+
+    const card = document.createElement('div');
+    card.style.cssText =
+      'background:rgba(50,50,50,0.95);border-radius:14px;padding:24px 32px;text-align:center;min-width:260px;';
+
+    this._endDialogMsg = document.createElement('p');
+    this._endDialogMsg.style.cssText = 'color:#fff;font-size:15px;margin:0 0 6px;';
+    this._endDialogCount = document.createElement('p');
+    this._endDialogCount.style.cssText = 'color:#aaa;font-size:13px;margin:0 0 16px;';
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:12px;justify-content:center;';
+
+    this._endDialogAgreeBtn = document.createElement('button');
+    this._endDialogAgreeBtn.textContent = '同意';
+    this._endDialogAgreeBtn.style.cssText =
+      'background:#4caf50;color:#fff;border:none;border-radius:20px;padding:8px 24px;font-size:14px;cursor:pointer;';
+
+    this._endDialogRejectBtn = document.createElement('button');
+    this._endDialogRejectBtn.textContent = '拒绝';
+    this._endDialogRejectBtn.style.cssText =
+      'background:#f44336;color:#fff;border:none;border-radius:20px;padding:8px 24px;font-size:14px;cursor:pointer;';
+
+    btnRow.appendChild(this._endDialogAgreeBtn);
+    btnRow.appendChild(this._endDialogRejectBtn);
+    card.appendChild(this._endDialogMsg);
+    card.appendChild(this._endDialogCount);
+    card.appendChild(btnRow);
+    this._endDialog.appendChild(card);
+    document.body.appendChild(this._endDialog);
+  }
+
+  showEndGameDialog(initiator, agreed, total, canVote) {
+    this._endDialog.style.display = 'flex';
+    this._endDialogMsg.textContent = `${initiator} 希望结束本局游戏`;
+    this._endDialogCount.textContent = `已同意 ${agreed}/${total}`;
+    if (canVote) {
+      this._endDialogAgreeBtn.style.display = 'inline-block';
+      this._endDialogRejectBtn.style.display = 'inline-block';
+    } else {
+      this._endDialogAgreeBtn.style.display = 'none';
+      this._endDialogRejectBtn.style.display = 'none';
+    }
+  }
+
+  hideEndGameDialog() { if (this._endDialog) this._endDialog.style.display = 'none'; }
+  onEndDialogAgree(cb) { if (this._endDialogAgreeBtn) this._endDialogAgreeBtn.addEventListener('click', cb); }
+  onEndDialogReject(cb) { if (this._endDialogRejectBtn) this._endDialogRejectBtn.addEventListener('click', cb); }
 
   /* ================================================================
    *  RACE PROGRESS BAR (top of screen, markers for each player)
@@ -513,6 +587,21 @@ export class UI {
     card.appendChild(this._nameInput);
     card.appendChild(colorRow);
     card.appendChild(preview);
+
+    // ---- Audio section ----
+    const audioSection = document.createElement('div');
+    audioSection.style.cssText = 'margin-top:14px;display:flex;flex-direction:column;gap:8px;';
+    audioSection.innerHTML = '<span style="color:#aaa;font-size:12px;">自定义音效(可选)</span>';
+    // Charge audio row
+    const chargeRow = this._makeAudioRow('蓄力音效', 'charge');
+    // Jump audio row
+    const jumpRow = this._makeAudioRow('跳跃音效', 'jump');
+    audioSection.appendChild(chargeRow);
+    audioSection.appendChild(jumpRow);
+    card.appendChild(audioSection);
+
+    btnRow.appendChild(skipBtn);
+    btnRow.appendChild(startBtn);
     card.appendChild(btnRow);
     container.appendChild(card);
     document.body.appendChild(container);
@@ -525,33 +614,118 @@ export class UI {
     this._uploadSkipBtn     = skipBtn;
   }
 
+  _makeAudioRow(label, kind) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    const lbl = document.createElement('span');
+    lbl.textContent = label;
+    lbl.style.cssText = 'color:#ccc;font-size:12px;width:60px;';
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.style.cssText = 'color:#aaa;font-size:11px;flex:1;min-width:0;';
+    const status = document.createElement('span');
+    status.style.cssText = 'color:#888;font-size:10px;min-width:18px;text-align:center;';
+    input.addEventListener('change', () => {
+      status.textContent = input.files[0] ? '✅' : '';
+    });
+
+    // Record button
+    const recordBtn = document.createElement('button');
+    recordBtn.textContent = '🎙️';
+    recordBtn.title = '点击录音';
+    recordBtn.style.cssText =
+      'background:transparent;border:1px solid #555;color:#aaa;border-radius:4px;' +
+      'padding:2px 6px;font-size:14px;cursor:pointer;flex-shrink:0;';
+    let mediaRecorder = null, chunks = [];
+
+    recordBtn.addEventListener('click', async () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        // Stop recording
+        mediaRecorder.stop();
+        recordBtn.textContent = '🎙️';
+        recordBtn.style.borderColor = '#555';
+        status.textContent = '⏳';
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        chunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+        mediaRecorder.onstop = () => {
+          stream.getTracks().forEach(t => t.stop());
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const file = new File([blob], `${kind}.webm`, { type: 'audio/webm' });
+          // Inject into the file input
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          input.files = dt.files;
+          status.textContent = '✅';
+          mediaRecorder = null;
+        };
+        mediaRecorder.start();
+        recordBtn.textContent = '🔴';
+        recordBtn.style.borderColor = '#f44336';
+        status.textContent = '';
+      } catch {
+        status.textContent = '❌';
+      }
+    });
+
+    row.appendChild(lbl);
+    row.appendChild(input);
+    row.appendChild(recordBtn);
+    row.appendChild(status);
+    if (kind === 'charge') this._chargeAudioInput = input;
+    else this._jumpAudioInput = input;
+    return row;
+  }
+
   showUploadDialog() {
     return new Promise((resolve) => {
       this._uploadContainer.style.display = 'flex';
-      const finish = (texture, texDataURL) => {
+      const finish = (texture, texDataURL, chargeAudioURL, jumpAudioURL) => {
         this._uploadContainer.style.display = 'none';
-        resolve({ name: this._nameInput.value.trim() || '玩家', texture, color: this._colorInput.value, texDataURL });
+        resolve({ name: this._nameInput.value.trim() || '玩家', texture, color: this._colorInput.value, texDataURL, chargeAudioURL, jumpAudioURL });
       };
-      this._uploadSkipBtn.onclick = () => finish(null, null);
+      this._uploadSkipBtn.onclick = () => finish(null, null, null, null);
+
       this._uploadStartBtn.onclick = () => {
-        const file = this._uploadFileInput.files[0];
-        if (!file) { finish(null, null); return; }
+        const imgFile = this._uploadFileInput.files[0];
+        // Read audio files
+        const audioPromises = [];
+        const chargeFile = this._chargeAudioInput?.files[0];
+        const jumpFile = this._jumpAudioInput?.files[0];
+        if (chargeFile) {
+          audioPromises.push(new Promise(r => { const rd = new FileReader(); rd.onload = e => r({ kind: 'charge', url: e.target.result }); rd.readAsDataURL(chargeFile); }));
+        }
+        if (jumpFile) {
+          audioPromises.push(new Promise(r => { const rd = new FileReader(); rd.onload = e => r({ kind: 'jump', url: e.target.result }); rd.readAsDataURL(jumpFile); }));
+        }
+
+        const thenFinish = (tex, texURL) => {
+          if (audioPromises.length === 0) { finish(tex, texURL, null, null); return; }
+          Promise.all(audioPromises).then(results => {
+            let cu = null, ju = null;
+            for (const r of results) { if (r.kind === 'charge') cu = r.url; else ju = r.url; }
+            finish(tex, texURL, cu, ju);
+          });
+        };
+
+        if (!imgFile) { thenFinish(null, null); return; }
         const reader = new FileReader();
         reader.onload = (e) => {
           const img = new Image();
           const rawURL = e.target.result;
           img.onload = () => {
-            // Center-crop to largest square, scale to 256×256 for texture
             const size = Math.min(img.width, img.height);
-            const sx = (img.width - size) / 2;
-            const sy = (img.height - size) / 2;
+            const sx = (img.width - size) / 2, sy = (img.height - size) / 2;
             const canvas = document.createElement('canvas');
             canvas.width = canvas.height = 256;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, sx, sy, size, size, 0, 0, 256, 256);
             const croppedURL = canvas.toDataURL('image/jpeg', 0.85);
-
-            // Load cropped version into THREE.Texture
             const croppedImg = new Image();
             croppedImg.onload = () => {
               const tex = new THREE.Texture(croppedImg);
@@ -561,13 +735,13 @@ export class UI {
               tex.center.set(0.5, 0.5);
               tex.rotation = 2 * Math.PI / 3;
               tex.needsUpdate = true;
-              finish(tex, croppedURL);
+              thenFinish(tex, croppedURL);
             };
             croppedImg.src = croppedURL;
           };
           img.src = rawURL;
         };
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(imgFile);
       };
     });
   }

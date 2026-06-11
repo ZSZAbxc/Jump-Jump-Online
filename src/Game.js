@@ -3,13 +3,14 @@ import { Physics } from './Physics.js';
 import * as THREE from 'three';
 
 export class Game {
-  constructor(renderer, world, cameraCtrl, input, ui, network) {
+  constructor(renderer, world, cameraCtrl, input, ui, network, audioManager) {
     this.renderer   = renderer;
     this.world      = world;
     this.cameraCtrl = cameraCtrl;
     this.input      = input;
     this.ui         = ui;
     this.network    = network;
+    this.audioManager = audioManager;
 
     this.state = GAME_STATES.IDLE;
     this.score = 0;
@@ -39,6 +40,9 @@ export class Game {
     this._syncTimer = 0;
     this._texSynced = false;
     this._texDataURL = null;
+    this._chargeAudioURL = null;
+    this._jumpAudioURL = null;
+    this._chargeHandle = null; // active charge sound handle
 
     // Fixed timestep: run at most N physics ticks per frame
     this._physAccum = 0;
@@ -225,19 +229,18 @@ export class Game {
   _loop() {
     requestAnimationFrame(() => this._loop());
 
-    // Fixed timestep: run at most 60 physics ticks per second
+    // ── Fixed-timestep physics (60Hz, clock-driven, not frame-driven) ──
     const now = performance.now();
-    const frameDelta = this._lastPhysTime ? (now - this._lastPhysTime) / 1000 : this._physStep;
+    const dt = this._lastPhysTime ? (now - this._lastPhysTime) / 1000 : this._physStep;
     this._lastPhysTime = now;
-    this._physAccum += Math.min(frameDelta, 0.05);
+    this._physAccum += dt;
 
-    // Run physics up to once per frame (60Hz cap on 120Hz screens)
-    if (this._physAccum >= this._physStep) {
+    // Run physics at 60Hz. On slow hardware, catch up (up to 120 ticks / 2s behind).
+    for (let i = 0; i < 120 && this._physAccum >= this._physStep; i++) {
       this._physAccum -= this._physStep;
-      if (this._physAccum > this._physStep) this._physAccum = this._physStep; // drain excess
 
-      // Timed countdown
-      if (this._timeRunning) {
+      // Timed countdown — uses server clock, runs once per frame
+      if (i === 0 && this._timeRunning) {
         const serverNow = Date.now() - this._serverClockOffset;
         const remaining = Math.max(0, (this._timeEndMs - serverNow) / 1000);
         this.ui.updateGameInfo(`⏱ ${Math.ceil(remaining)}s` +
@@ -245,26 +248,32 @@ export class Game {
         if (remaining <= 0) {
           this._timeRunning = false; this.input.disable();
           this.network?.sendTimeUp(this.score);
-          this._finished = true; return;
+          this._finished = true; break;
         }
       }
 
-      // Respawn timer
+      // Respawn timer — only one tick allowed
       if (this._respawnTimer > 0) {
-        this._respawnTimer -= 1 / 60;
+        this._respawnTimer -= this._physStep;
         if (this._respawnTimer <= 0) { this._respawnTimer = 0; this._doRespawn(); }
-        this.cameraCtrl.updateTarget(this.world.cubes, this.world.currentIdx);
-        this.cameraCtrl.update();
-        this.world.lerpRemotes(1 / 60);
-        this.world.updateNameSprite();
-        this.renderer.render();
-        return;
+        break;
       }
 
-      this._update();
+      // Core physics update (one tick)
+      if (!this._dead || !this._fallEnded || this._respawnTimer > 0) {
+        switch (this.state) {
+          case GAME_STATES.CHARGING:      this._updateCharging();      break;
+          case GAME_STATES.JUMPING:       this._updateJumping();       break;
+          case GAME_STATES.TRANSITIONING: this._updateTransitioning(); break;
+          case GAME_STATES.FALLING:       this._updateFalling();       break;
+          default: break;
+        }
+      }
     }
 
-    // Always run visual passes — camera, fades, render
+    if (this._finished) { this._physAccum = 0; return; }
+
+    // ── Visual passes (always run, regardless of physics ticks) ──
     this.cameraCtrl.updateTarget(this.world.cubes, this.world.currentIdx);
     this.cameraCtrl.update();
     this.world.updateFades();
@@ -272,10 +281,15 @@ export class Game {
     this._updateModeUI();
     this.world.lerpRemotes(1 / 60);
     this.world.updateNameSprite();
+    if (this.audioManager) {
+      this.audioManager.setMyIdx(this.world.currentIdx);
+      this.audioManager.updateRemoteVolumes();
+    }
     this.renderer.render();
   }
 
   _update() {
+    // kept for API compatibility — not used directly
     if (this._dead && this._fallEnded && this._respawnTimer <= 0) return;
     switch (this.state) {
       case GAME_STATES.CHARGING:      this._updateCharging();      break;
@@ -309,6 +323,8 @@ export class Game {
       this._texSynced = true;
       payload.texData = this._texDataURL;
     }
+    if (this._chargeAudioURL) payload.chargeAudio = this._chargeAudioURL;
+    if (this._jumpAudioURL) payload.jumpAudio = this._jumpAudioURL;
     this.network.sendState(payload);
   }
 
@@ -351,6 +367,7 @@ export class Game {
     if (this.state !== GAME_STATES.IDLE && this.state !== GAME_STATES.TRANSITIONING) return;
     this.state = GAME_STATES.CHARGING;
     this._chargePower = 0;
+    if (this.audioManager) this._chargeHandle = this.audioManager.playCharge();
   }
 
   _onRelease() {
@@ -362,6 +379,7 @@ export class Game {
     this.state = GAME_STATES.JUMPING;
     this._chargePower = 0;
     this.world.jumper.scale.set(1, 1, 1);
+    if (this.audioManager) { this.audioManager.playJump(this._chargeHandle); this._chargeHandle = null; }
   }
 
   /* ================================================================
@@ -451,6 +469,7 @@ export class Game {
     this._fallEnded = false;
     this.input.disable();
     this._transitionSteps = 0;
+    if (this.audioManager && this._chargeHandle) { this.audioManager.playJump(this._chargeHandle); this._chargeHandle = null; }
 
     const j = this.world.jumper;
     const dir = this.world.currentDir;

@@ -5,6 +5,7 @@ import { InputManager } from './InputManager.js';
 import { UI } from './UI.js';
 import { Game } from './Game.js';
 import { Network } from './Network.js';
+import { AudioManager } from './AudioManager.js';
 import * as THREE from 'three';
 
 const renderer = new Renderer();
@@ -13,7 +14,8 @@ const cameraCtrl = new CameraController(renderer.camera);
 const input = new InputManager(renderer.domElement);
 const ui = new UI();
 const network = new Network();
-const game = new Game(renderer, world, cameraCtrl, input, ui, network);
+const audioManager = new AudioManager();
+const game = new Game(renderer, world, cameraCtrl, input, ui, network, audioManager);
 
 let myColor = '#232323';
 let myName = '玩家';
@@ -63,9 +65,36 @@ network.onGameStart = ({ cubes, dirs, mode, modeParam, faceAssignments, playerFa
   game._remotePlayers.clear();
   game.restart();
   game.start();
+  ui.showEndGameButton(); // show in-game (after restart clears it)
 };
 
 network.onRemoteState = (state) => {
+  // Remote audio: detect state changes
+  const prevState = game._remoteStates?.get(state.socketId);
+  game._remoteStates = game._remoteStates || new Map();
+  game._remoteStates.set(state.socketId, state.state);
+
+  if (state.state === 'charging' && prevState !== 'charging') {
+    audioManager.remoteChargeStart(state.socketId);
+  } else if (state.state === 'jumping' && prevState === 'charging') {
+    audioManager.remoteJumpStart(state.socketId);
+  } else if (state.state === 'falling' || state.state === 'gameover') {
+    audioManager.stopRemote(state.socketId);
+  }
+
+  // Decode audio data URLs on first receive
+  if (state.chargeAudio && !audioManager._remoteChargeBufs.has(state.socketId)) {
+    AudioManager.decodeDataURL(state.chargeAudio).then(buf => {
+      if (buf) audioManager.setRemoteAudio(state.socketId, buf, null);
+    });
+  }
+  if (state.jumpAudio && !audioManager._remoteJumpBufs.has(state.socketId)) {
+    AudioManager.decodeDataURL(state.jumpAudio).then(buf => {
+      if (buf) audioManager.setRemoteAudio(state.socketId, null, buf);
+    });
+  }
+
+  audioManager.setRemoteIdx(state.socketId, state.idx ?? 0);
   game.applyRemoteState(state.socketId, state);
 };
 
@@ -79,6 +108,7 @@ network.onGameOver = ({ winner, winnerName, reason, scores }) => {
       ui.hideRaceBar();
       ui.hideTimedLeaderboard();
       ui.hideRelativeBar();
+      ui.hideEndGameButton();
       game.restart();
       ui.showWaitingScreen(network.roomId, amHost);
     });
@@ -90,6 +120,7 @@ network.onGameOver = ({ winner, winnerName, reason, scores }) => {
       ui.hideRaceBar();
       ui.hideTimedLeaderboard();
       ui.hideRelativeBar();
+      ui.hideEndGameButton();
       game.restart();
       ui.showWaitingScreen(network.roomId, amHost);
     });
@@ -125,6 +156,47 @@ network.onPlayerOffline = ({ socketId }) => {
   game.removeRemote(socketId);
 };
 
+// ── End-game vote ─────────────────────────────────────────────────────
+ui.onEndGameClick(() => {
+  network.sendEndGameVote();
+});
+
+network.onEndGameVoteStart = ({ initiatorName, voterIds, total, agreed }) => {
+  const canVote = !voterIds?.includes(network.playerId);
+  ui._voteInitiator = initiatorName;
+  ui.showEndGameDialog(initiatorName, agreed || 1, total, canVote);
+};
+
+network.onEndGameVoteUpdate = ({ agreed, total, voterIds }) => {
+  const canVote = !voterIds?.includes(network.playerId);
+  ui.showEndGameDialog(ui._voteInitiator, agreed, total, canVote);
+};
+
+network.onEndGameVoteEnd = ({ passed, reason }) => {
+  ui.hideEndGameDialog();
+  if (passed) {
+    game._finished = true;
+    game.input.disable();
+    ui.hideGameInfo(); ui.hideRaceBar(); ui.hideTimedLeaderboard(); ui.hideRelativeBar();
+    ui.showGameOver('⚖️ 全票通过', '游戏结束', '', '回到房间', () => {
+      ui.hideGameOver(); ui.hideGameInfo(); ui.hideEndGameButton();
+      ui.hideRaceBar(); ui.hideTimedLeaderboard(); ui.hideRelativeBar();
+      game.restart();
+      ui.showWaitingScreen(network.roomId, amHost);
+    });
+  }
+};
+
+ui.onEndDialogAgree(() => {
+  network.sendEndGameVoteResponse(true);
+  ui.hideEndGameDialog();
+});
+
+ui.onEndDialogReject(() => {
+  network.sendEndGameVoteResponse(false);
+  ui.hideEndGameDialog();
+});
+
 // ── UI callbacks ────────────────────────────────────────────────────
 ui.onRoomReady((ready) => network.setReady(ready));
 ui.onRoomStartGame(() => network.startGame());
@@ -144,7 +216,7 @@ ui.onRandomFacesToggle(() => {
 });
 
 // ── Flow ────────────────────────────────────────────────────────────
-ui.showUploadDialog().then(async ({ name, texture, color, texDataURL }) => {
+ui.showUploadDialog().then(async ({ name, texture, color, texDataURL, chargeAudioURL, jumpAudioURL }) => {
   myName = name;
   myColor = color;
   world.configureJumper(texture, parseInt(color.replace('#', ''), 16));
@@ -154,6 +226,13 @@ ui.showUploadDialog().then(async ({ name, texture, color, texDataURL }) => {
   world.setJumperName(myName);
   game.setMyName(myName);
   game.setMyColorHex(color);
+
+  // Decode audio data URLs into AudioBuffers
+  const chargeBuf = await AudioManager.decodeDataURL(chargeAudioURL);
+  const jumpBuf = await AudioManager.decodeDataURL(jumpAudioURL);
+  audioManager.setLocalAudio(chargeBuf, jumpBuf);
+  if (chargeAudioURL) game._chargeAudioURL = chargeAudioURL;
+  if (jumpAudioURL) game._jumpAudioURL = jumpAudioURL;
 
   try {
     await network.connect();

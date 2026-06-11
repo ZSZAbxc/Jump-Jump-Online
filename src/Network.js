@@ -27,6 +27,9 @@ export class Network {
     this.onReconnectState = null;
     this.onPlayerReconnected = null;
     this.onPlayerOffline = null;
+    this.onEndGameVoteStart = null;
+    this.onEndGameVoteUpdate = null;
+    this.onEndGameVoteEnd = null;
     this.onError = null;
   }
 
@@ -58,6 +61,9 @@ export class Network {
     this.socket.on('reconnect_state', (data) => { this.onReconnectState?.(data); });
     this.socket.on('player_reconnected', (data) => { this.onPlayerReconnected?.(data); });
     this.socket.on('player_offline', (data) => { this.onPlayerOffline?.(data); });
+    this.socket.on('end_game_vote_start', (data) => { this.onEndGameVoteStart?.(data); });
+    this.socket.on('end_game_vote_update', (data) => { this.onEndGameVoteUpdate?.(data); });
+    this.socket.on('end_game_vote_end', (data) => { this.onEndGameVoteEnd?.(data); });
     this.socket.on('error', (msg) => { this.onError?.(msg); });
   }
 
@@ -76,6 +82,8 @@ export class Network {
   sendIdx(idx)              { this.socket.emit('update_idx', { idx }); }
   sendFinish()              { this.socket.emit('player_finish'); }
   sendTimeUp(score)         { this.socket.emit('time_up', { score }); }
+  sendEndGameVote()          { this.socket.emit('end_game_vote'); }
+  sendEndGameVoteResponse(agree) { this.socket.emit('end_game_vote_response', { agree }); }
   ping()                    { this.socket.emit('ping_req', Date.now()); }
   sendLatency(ping)          { this.socket.emit('latency_update', { ping }); }
   getLatency()               { return this._latency; }
