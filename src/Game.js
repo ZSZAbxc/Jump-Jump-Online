@@ -256,6 +256,8 @@ export class Game {
       if (this._respawnTimer > 0) {
         this._respawnTimer -= this._physStep;
         if (this._respawnTimer <= 0) { this._respawnTimer = 0; this._doRespawn(); }
+        this.world.lerpRemotes(this._physStep);
+        this.world.updateNameSprite();
         break;
       }
 
@@ -269,6 +271,9 @@ export class Game {
           default: break;
         }
       }
+      // Remote prediction + name sync: once per physics tick = 60Hz invariant
+      this.world.lerpRemotes(this._physStep);
+      this.world.updateNameSprite();
     }
 
     if (this._finished) { this._physAccum = 0; return; }
@@ -279,8 +284,6 @@ export class Game {
     this.world.updateFades();
     this._syncState();
     this._updateModeUI();
-    this.world.lerpRemotes(1 / 60);
-    this.world.updateNameSprite();
     if (this.audioManager) {
       this.audioManager.setMyIdx(this.world.currentIdx);
       this.audioManager.updateRemoteVolumes();
