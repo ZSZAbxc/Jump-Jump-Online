@@ -544,11 +544,6 @@ export class UI {
     // Buttons
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;gap:12px;justify-content:center;';
-    const skipBtn = document.createElement('button');
-    skipBtn.textContent = '使用默认';
-    skipBtn.style.cssText =
-      'background:transparent;color:#ccc;border:1px solid #666;border-radius:20px;' +
-      'padding:8px 24px;font-size:14px;cursor:pointer;';
     const startBtn = document.createElement('button');
     startBtn.textContent = '确定';
     startBtn.style.cssText =
@@ -581,7 +576,6 @@ export class UI {
       reader.readAsDataURL(file);
     });
 
-    btnRow.appendChild(skipBtn);
     btnRow.appendChild(startBtn);
     preview.appendChild(previewImg); // img INSIDE the circle
     card.appendChild(this._nameInput);
@@ -600,7 +594,6 @@ export class UI {
     audioSection.appendChild(jumpRow);
     card.appendChild(audioSection);
 
-    btnRow.appendChild(skipBtn);
     btnRow.appendChild(startBtn);
     card.appendChild(btnRow);
     container.appendChild(card);
@@ -611,7 +604,6 @@ export class UI {
     this._uploadPreviewImg  = previewImg;
     this._uploadPreviewText = previewText;
     this._uploadStartBtn    = startBtn;
-    this._uploadSkipBtn     = skipBtn;
   }
 
   _makeAudioRow(label, kind) {
@@ -689,8 +681,6 @@ export class UI {
         this._uploadContainer.style.display = 'none';
         resolve({ name: this._nameInput.value.trim() || '玩家', texture, color: this._colorInput.value, texDataURL, chargeAudioURL, jumpAudioURL });
       };
-      this._uploadSkipBtn.onclick = () => finish(null, null, null, null);
-
       this._uploadStartBtn.onclick = () => {
         const imgFile = this._uploadFileInput.files[0];
         // Read audio files
