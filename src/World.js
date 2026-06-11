@@ -167,13 +167,16 @@ export class World {
     const remote = this.remotes.get(id);
     if (!remote) return;
 
-    // Detect falling — start local sim
+    // Detect falling — start local sim (once only, guarded by _fallDone)
     const isFall = state.state === 'falling' || state.state === 'gameover';
-    if (isFall && !remote.sim) {
+    const isIdle  = state.state === 'idle' || state.state === 'charging';
+    if (isFall && !remote.sim && !remote._fallDone) {
       this._startRemoteSim(remote, state);
     }
-    // Respawn resets
-    if (!isFall && remote.sim) {
+    // Reset fall guard when player respawns
+    if (isIdle) remote._fallDone = false;
+    // Don't kill jump sim mid-flight — it self-destructs on landing
+    if (!isFall && remote.sim && remote.sim.type !== 'jump') {
       remote.sim = null;
     }
 
@@ -253,20 +256,33 @@ export class World {
           remote.sim = null;
           m.position.y = JUMPER.startY;
           m.scale.set(1, 1, 1);
+          remote._justLanded = true; // next frame: hard-snap to server
         }
       } else if (sim && sim.type === 'fall') {
         // ── FALL: slide outward + vertical drop ──
         m.position[sim.axis] += sim.sign * 0.06;
         if (m.position.y > GROUND_Y) m.position.y -= PHYSICS.fallSpeed;
-        else { m.position.y = GROUND_Y; remote.sim = null; }
+        else {
+          m.position.y = GROUND_Y;
+          remote.sim = null;
+          remote._fallDone = true;
+          remote._justFell = true; // next frame: hard-snap to server
+        }
       } else {
-        // ── IDLE/CHARGING: lerp to server ──
-        m.position.x += (remote.targetPos.x - m.position.x) * 0.4;
-        m.position.y += (remote.targetPos.y - m.position.y) * 0.4;
-        m.position.z += (remote.targetPos.z - m.position.z) * 0.4;
-        const sy = m.scale.y + (remote.targetScaleY - m.scale.y) * 0.4;
-        m.scale.y = sy;
-        m.scale.x = m.scale.z = 1 + (1 - sy);
+        // ── IDLE/CHARGING: first frame after land/fall → hard-snap, then lerp ──
+        if (remote._justLanded || remote._justFell) {
+          m.position.set(remote.targetPos.x, remote.targetPos.y, remote.targetPos.z);
+          m.scale.set(1, 1, 1);
+          remote._justLanded = false;
+          remote._justFell = false;
+        } else {
+          m.position.x += (remote.targetPos.x - m.position.x) * 0.4;
+          m.position.y += (remote.targetPos.y - m.position.y) * 0.4;
+          m.position.z += (remote.targetPos.z - m.position.z) * 0.4;
+          const sy = m.scale.y + (remote.targetScaleY - m.scale.y) * 0.4;
+          m.scale.y = sy;
+          m.scale.x = m.scale.z = 1 + (1 - sy);
+        }
       }
     }
   }
