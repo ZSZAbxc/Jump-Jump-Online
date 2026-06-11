@@ -387,21 +387,22 @@ export class Game {
   _onRelease() {
     if (this._dead || this._finished || this._respawnTimer > 0) return;
     if (this.state !== GAME_STATES.CHARGING) return;
-    this._jumpVelX = this._chargePower * 1.3125;
-    this._jumpVelY = PHYSICS.jumpSpeedY + this._chargePower * 2.6;
+    const savedPower = this._chargePower;
+    this._jumpVelX = savedPower * 1.3125;
+    this._jumpVelY = PHYSICS.jumpSpeedY + savedPower * 2.6;
     this._hasLaunched = false;
     this.state = GAME_STATES.JUMPING;
-    this._chargePower = 0;
-    this.world.jumper.scale.set(1, 1, 1);
-    if (this.audioManager) { this.audioManager.playJump(this._chargeHandle); this._chargeHandle = null; }
-    // Event-based sync — send jump start once, rest is simulated locally
+    // send BEFORE we clear anything — remote needs the charge amount
     this.network?.sendState({
       state: 'jumping', score: this.score, idx: this.world.currentIdx,
       name: this._myName, color: this._myColorHex,
-      jumpCharge: this._chargePower, jumpDir: this.world.currentDir,
+      jumpCharge: savedPower, jumpDir: this.world.currentDir,
       pos: { x: this.world.jumper.position.x, y: this.world.jumper.position.y, z: this.world.jumper.position.z },
-      scaleY: 1,
+      scaleY: this.world.jumper.scale.y,
     });
+    this._chargePower = 0;
+    this.world.jumper.scale.set(1, 1, 1);
+    if (this.audioManager) { this.audioManager.playJump(this._chargeHandle); this._chargeHandle = null; }
   }
 
   /* ================================================================

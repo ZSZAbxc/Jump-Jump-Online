@@ -246,6 +246,14 @@ export class World {
           m.position.x += (sp.x - m.position.x) * 0.15;
           m.position.z += (sp.z - m.position.z) * 0.15;
         }
+        // Landing detection: snap to last known server position when below start Y
+        if (sim.pos.y <= JUMPER.startY) {
+          remote.sim = null; // stop local sim
+          if (sp) {
+            m.position.set(sp.x, JUMPER.startY, sp.z);
+          }
+          m.scale.set(1, 1, 1);
+        }
       } else if (sim && sim.type === 'fall') {
         // ── FALL: slide outward + vertical drop ──
         m.position[sim.axis] += sim.sign * 0.06;
