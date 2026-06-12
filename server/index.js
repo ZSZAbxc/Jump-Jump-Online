@@ -271,8 +271,6 @@ io.on('connection', (socket) => {
     broadcastRoom(room);
   });
 
-  });
-
   // ── Chat ────────────────────────────────────────────────────────
   socket.on('chat_message', ({ message }) => {
     const room = rooms.get(myRoom); if (!room) return;
