@@ -160,6 +160,7 @@ network.onReconnectState = (data) => {
 
 network.onPlayerReconnected = ({ oldSocketId, socketId, name, color, idx, score }) => {
   world.updatePlayerFaceId(oldSocketId, socketId);
+  game._remotePlayers.delete(oldSocketId); // clean old entry
   game.applyRemoteState(socketId, { pos: { x: 0, y: 1, z: 0 }, rot: { x: 0, y: 0, z: 0 }, scaleY: 1, state: 'idle', score, idx, name, color });
 };
 

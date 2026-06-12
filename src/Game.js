@@ -365,13 +365,20 @@ export class Game {
       idx: this.world.currentIdx,
       texURL: this._texDataURL,
     }];
+    const seen = new Set();
     for (const [id, p] of this._remotePlayers) {
-      list.push({ id, name: p.name, color: p.color, score: p.score, idx: p.idx, texURL: p.texURL });
+      // Dedupe by name: keep highest idx (most up-to-date)
+      const existing = list.find(x => x.name === p.name && x.id !== 'me');
+      if (!existing) {
+        list.push({ id, name: p.name, color: p.color, score: p.score, idx: p.idx, texURL: p.texURL });
+      } else if (p.idx >= existing.idx) {
+        existing.id = id; existing.score = p.score; existing.idx = p.idx; existing.color = p.color; existing.texURL = p.texURL;
+      }
     }
     return list;
   }
 
-  removeRemote(id) { this.world.removeRemote(id); }
+  removeRemote(id) { this.world.removeRemote(id); this._remotePlayers.delete(id); }
 
   /* ================================================================
    *  INPUT
