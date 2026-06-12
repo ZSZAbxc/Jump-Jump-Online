@@ -148,6 +148,7 @@ network.onBecomeHost = () => {
 network.onReconnectState = (data) => {
   network.playerId = data.playerId; // update to new socket ID
   network.roomId = data.roomId;
+  world.setMySocketId(data.playerId);
   // Update myName from server's deduped name
   const me = data.players?.find(p => p.socketId === data.playerId);
   if (me?.name) { myName = me.name; game.setMyName(myName); world.setJumperName(myName); }
@@ -278,6 +279,7 @@ async function startRoomFlow() {
             world.setJumperName(myName);
           }
           world.setMyPlayerId(network.playerId);
+          world.setMySocketId(network.playerId);
           // Now that we know our socket ID, register self texture for cube faces
           if (game._texDataURL) world.setSelfFaceTex(game._texDataURL);
           ui.showWaitingScreen(roomId, amHost, network.joinedModeConfig);

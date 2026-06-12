@@ -12,6 +12,7 @@ export class World {
 
     this.remotes = new Map();
 
+    this._mySocketId = null;
     this._cubeFaces = new Map();
     this._playerFaceTex = new Map();
     this._playerFacesList = [];
@@ -25,6 +26,7 @@ export class World {
 
   configureJumper(tex, color) { this._jumperTex = tex || null; this._jumperColor = color; }
   setJumperName(name) { this._jumperName = name; }
+  setMySocketId(id) { this._mySocketId = id; }
   setMyPlayerId(id) {
     this._myPlayerId = id;
     if (this._pendingSelfTex) {
@@ -375,77 +377,102 @@ export class World {
   _createJumper() { if (this.jumper) { this._disposeMaterials(this.jumper.material); this.scene.remove(this.jumper); } if (this._nameSprite) { this.scene.remove(this._nameSprite); this._nameSprite = null; } const r = JUMPER.width / 2; const geo = new THREE.CylinderGeometry(r, r, JUMPER.height, 32); geo.translate(0, JUMPER.height / 2, 0); const mats = this._makeJumperMats(); this.jumper = new THREE.Mesh(geo, mats); if (this._jumperName) { this._nameSprite = this._makeNameSprite(this._jumperName, '#ffffff', 1); this.scene.add(this._nameSprite); } if (this.cubes.length) this.jumper.position.copy(this.cubes[0].position); this.jumper.position.y = JUMPER.startY; this.scene.add(this.jumper); }
 
   /* ================================================================
-   *  CHAT BUBBLE (above remote player heads, 5s + 1s fade)
+   *  CHAT BUBBLE (above player heads, 5s + 1s fade)
    * ================================================================ */
 
   showChatBubble(id, message) {
-    const remote = this.remotes.get(id);
-    if (!remote) return;
+    // Support local player too
+    const isLocal = (id === this._mySocketId);
+    const mesh = isLocal ? this.jumper : this.remotes.get(id)?.mesh;
+    if (!mesh) return;
+
     // Remove old bubble
-    if (remote._bubble) { remote.mesh.remove(remote._bubble); remote._bubble.material.map?.dispose(); remote._bubble.material.dispose(); }
-    // Draw bubble canvas
-    const cvs = document.createElement('canvas'); cvs.width = 256; cvs.height = 96;
-    const ctx = cvs.getContext('2d');
-    // Measure text
-    ctx.font = 'bold 18px Arial, sans-serif';
-    const maxW = 220, lineH = 22;
-    const words = message;
-    let line = ''; const lines = [];
-    for (const ch of words) {
-      const test = line + ch;
-      if (ctx.measureText(test).width > maxW && line.length > 0) { lines.push(line); line = ch; }
-      else line = test;
+    const oldKey = isLocal ? '_localBubble' : '_bubble';
+    const store = isLocal ? this : this.remotes.get(id);
+    if (!store) return;
+    if (store[oldKey]) {
+      mesh.remove(store[oldKey]);
+      store[oldKey].material.map?.dispose();
+      store[oldKey].material.dispose();
     }
-    if (line) lines.push(line);
-    const totalH = lines.length * lineH + 16;
-    cvs.height = totalH + 20; // +triangle
-    // Background bubble rect
-    const rx = 10, ry = 6, rw = cvs.width - 20, rh = totalH;
+
+    // Draw bubble canvas (font 250% larger, tight fit)
+    const fontSize = 45, lineH = 54, padX = 24, padY = 18, triH = 24;
+    const cvs = document.createElement('canvas');
+    const ctx = cvs.getContext('2d');
+    ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+    // Measure & wrap text
+    const maxTextW = 500;
+    const lines = [];
+    let cur = '';
+    for (const ch of message) {
+      const test = cur + ch;
+      if (ctx.measureText(test).width > maxTextW && cur.length > 0) { lines.push(cur); cur = ch; }
+      else cur = test;
+    }
+    if (cur) lines.push(cur);
+    // Compute canvas size from widest line
+    let maxW = 0;
+    for (const l of lines) { const w = ctx.measureText(l).width; if (w > maxW) maxW = w; }
+    const cw = Math.ceil(Math.max(maxW + padX * 2, 80));
+    const ch = Math.ceil(lines.length * lineH + padY * 2 + triH);
+    cvs.width = cw; cvs.height = ch;
+
+    // Redraw after canvas resize (clears state)
+    ctx.font = `bold ${fontSize}px Arial, sans-serif`;
+    // Bubble rect (rounded corners + triangle pointer at bottom center)
+    const rx = 6, ry = 4, rw = cw - 12, rh = ch - triH;
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
     ctx.beginPath();
-    ctx.moveTo(rx + 12, ry); ctx.lineTo(rx + rw - 12, ry);
-    ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + 12);
-    ctx.lineTo(rx + rw, ry + rh - 12);
-    ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - 12, ry + rh);
-    ctx.lineTo(cvs.width / 2 + 10, ry + rh);
-    ctx.lineTo(cvs.width / 2, ry + rh + 14);
-    ctx.lineTo(cvs.width / 2 - 10, ry + rh);
-    ctx.lineTo(rx + 12, ry + rh);
-    ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - 12);
-    ctx.lineTo(rx, ry + 12);
-    ctx.quadraticCurveTo(rx, ry, rx + 12, ry);
+    const r = 14;
+    ctx.moveTo(rx + r, ry);
+    ctx.lineTo(rx + rw - r, ry);
+    ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + r);
+    ctx.lineTo(rx + rw, ry + rh - r);
+    ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - r, ry + rh);
+    ctx.lineTo(cw / 2 + 12, ry + rh);
+    ctx.lineTo(cw / 2, ry + rh + triH);
+    ctx.lineTo(cw / 2 - 12, ry + rh);
+    ctx.lineTo(rx + r, ry + rh);
+    ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - r);
+    ctx.lineTo(rx, ry + r);
+    ctx.quadraticCurveTo(rx, ry, rx + r, ry);
     ctx.fill();
     // Text
     ctx.fillStyle = '#333';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     for (let i = 0; i < lines.length; i++) {
-      ctx.fillText(lines[i], cvs.width / 2, 10 + i * lineH);
+      ctx.fillText(lines[i], cw / 2, padY + i * lineH);
     }
+
     const tex = new THREE.CanvasTexture(cvs); tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 1, depthTest: false, depthWrite: false });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(2.8, (totalH + 20) / 256 * 2.8, 1);
+    const aspect = ch / cw;
+    sprite.scale.set(3.5, 3.5 * aspect, 1);
     sprite.position.set(0, JUMPER.height + 1.5, 0);
-    remote.mesh.add(sprite);
-    remote._bubble = sprite;
-    remote._bubbleBorn = Date.now();
+    mesh.add(sprite);
+    store[oldKey] = sprite;
+    store._bubbleBorn = Date.now();
   }
 
   tickChatBubbles() {
     const now = Date.now();
-    for (const remote of this.remotes.values()) {
-      const b = remote._bubble;
+    const targets = [...this.remotes.values()];
+    if (this._localBubble) targets.push({ _bubble: this._localBubble, _bubbleBorn: this._bubbleBorn, mesh: this.jumper });
+    for (const t of targets) {
+      const b = t._bubble;
       if (!b) continue;
-      const age = (now - remote._bubbleBorn) / 1000;
+      const age = (now - (t._bubbleBorn || 0)) / 1000;
       if (age > 5) {
         const fade = Math.max(0, 1 - (age - 5) / 1);
         b.material.opacity = fade;
         if (fade <= 0) {
-          remote.mesh.remove(b);
+          t.mesh.remove(b);
           b.material.map?.dispose();
           b.material.dispose();
-          remote._bubble = null;
+          t._bubble = null;
         }
       }
     }
