@@ -1179,8 +1179,8 @@ export class UI {
 
     // -- Chat log (bottom-left) --
     const log = document.createElement('div');
-    log.style.cssText = 'position:fixed;left:12px;bottom:60px;max-width:320px;display:flex;flex-direction:column;gap:4px;' +
-      'pointer-events:none;z-index:199;';
+    log.style.cssText = 'position:fixed;top:85px;left:50%;transform:translateX(-50%);max-width:500px;display:flex;flex-direction:column;align-items:center;gap:4px;' +
+      'pointer-events:none;z-index:9;';
     log.id = 'chat-log';
 
     c.appendChild(log);
