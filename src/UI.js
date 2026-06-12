@@ -316,26 +316,29 @@ export class UI {
   _createRelativeBar() {
     this._relBar = document.createElement('div');
     this._relBar.style.cssText =
-      'display:none;position:fixed;inset:0;pointer-events:none;z-index:10;';
-    // Self marker (fixed bottom-left)
+      'display:none;position:fixed;top:80px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:10;' +
+      'flex-direction:column;align-items:center;gap:6px;';
+    // Self marker
     this._relSelf = document.createElement('div');
     this._relSelf.style.cssText =
-      'position:absolute;left:12px;bottom:20px;padding:4px 12px;border-radius:6px;' +
+      'padding:4px 12px;border-radius:6px;' +
       'background:rgba(0,0,0,0.5);color:#fff;font-size:13px;text-align:center;';
-    this._relBar.appendChild(this._relSelf);
-    // Containers
+    // Containers — both stacked in the flex column
     this._relTop = document.createElement('div');
-    this._relTop.style.cssText = 'position:absolute;left:12px;top:80px;display:flex;flex-direction:column;gap:12px;';
-    this._relBar.appendChild(this._relTop);
+    this._relTop.style.cssText = 'display:flex;flex-direction:column;gap:12px;align-items:center;';
     this._relBottom = document.createElement('div');
-    this._relBottom.style.cssText = 'position:absolute;left:12px;bottom:60px;display:flex;flex-direction:column;gap:12px;';
+    this._relBottom.style.cssText = 'display:flex;flex-direction:column;gap:12px;align-items:center;';
+
+    // Order: ahead → you → behind
+    this._relBar.appendChild(this._relTop);
+    this._relBar.appendChild(this._relSelf);
     this._relBar.appendChild(this._relBottom);
     document.body.appendChild(this._relBar);
   }
 
   showRelativeBar() {
     if (!this._relBar) this._createRelativeBar();
-    this._relBar.style.display = 'block';
+    this._relBar.style.display = 'flex';
   }
 
   updateRelativeBar(players, myName, myIdx) {
