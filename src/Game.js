@@ -257,6 +257,7 @@ export class Game {
         this._respawnTimer -= this._physStep;
         if (this._respawnTimer <= 0) { this._respawnTimer = 0; this._doRespawn(); }
         this.world.tickRemotes();
+        this.world.tickChatBubbles();
         this.world.updateNameSprite();
         break;
       }
@@ -273,6 +274,7 @@ export class Game {
       }
       // Remote prediction + name sync: once per physics tick = 60Hz invariant
       this.world.tickRemotes();
+      this.world.tickChatBubbles();
       this.world.updateNameSprite();
     }
 

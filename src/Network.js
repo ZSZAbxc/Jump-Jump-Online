@@ -34,6 +34,7 @@ export class Network {
     this.onEndGameVoteEnd = null;
     this.onRemoteJumpStart = null;
     this.onRemoteJumpLand = null;
+    this.onChatMessage = null;
     this.onError = null;
   }
 
@@ -87,6 +88,7 @@ export class Network {
     this.socket.on('end_game_vote_end', (data) => { this.onEndGameVoteEnd?.(data); });
     this.socket.on('remote_jump_start', (data) => { this.onRemoteJumpStart?.(data); });
     this.socket.on('remote_jump_land', (data) => { this.onRemoteJumpLand?.(data); });
+    this.socket.on('chat_message', (data) => { this.onChatMessage?.(data); });
     this.socket.on('error', (msg) => { this.onError?.(msg); });
   }
 
@@ -107,6 +109,7 @@ export class Network {
   sendTimeUp(score)         { this.socket.emit('time_up', { score }); }
   sendEndGameVote()          { this.socket.emit('end_game_vote'); }
   sendEndGameVoteResponse(agree) { this.socket.emit('end_game_vote_response', { agree }); }
+  sendChat(message)          { if (this.roomId) this.socket.emit('chat_message', { message }); }
   ping()                    { this.socket.emit('ping_req', Date.now()); }
   sendLatency(ping)          { this.socket.emit('latency_update', { ping }); }
   getLatency()               { return this._latency; }

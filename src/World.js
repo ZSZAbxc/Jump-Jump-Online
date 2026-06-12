@@ -373,4 +373,81 @@ export class World {
   _setGroupOpacity(mats, tgt) { const arr = Array.isArray(mats) ? mats : [mats]; for (const m of arr) { if (!m.transparent) m.transparent = true; const c = m.opacity; if (Math.abs(tgt-c) < 0.002) m.opacity = tgt; else m.opacity += (tgt-c)*0.12; } }
   _disposeMaterials(mats) { const arr = Array.isArray(mats) ? mats : [mats]; for (const m of arr) m.dispose(); }
   _createJumper() { if (this.jumper) { this._disposeMaterials(this.jumper.material); this.scene.remove(this.jumper); } if (this._nameSprite) { this.scene.remove(this._nameSprite); this._nameSprite = null; } const r = JUMPER.width / 2; const geo = new THREE.CylinderGeometry(r, r, JUMPER.height, 32); geo.translate(0, JUMPER.height / 2, 0); const mats = this._makeJumperMats(); this.jumper = new THREE.Mesh(geo, mats); if (this._jumperName) { this._nameSprite = this._makeNameSprite(this._jumperName, '#ffffff', 1); this.scene.add(this._nameSprite); } if (this.cubes.length) this.jumper.position.copy(this.cubes[0].position); this.jumper.position.y = JUMPER.startY; this.scene.add(this.jumper); }
+
+  /* ================================================================
+   *  CHAT BUBBLE (above remote player heads, 5s + 1s fade)
+   * ================================================================ */
+
+  showChatBubble(id, message) {
+    const remote = this.remotes.get(id);
+    if (!remote) return;
+    // Remove old bubble
+    if (remote._bubble) { remote.mesh.remove(remote._bubble); remote._bubble.material.map?.dispose(); remote._bubble.material.dispose(); }
+    // Draw bubble canvas
+    const cvs = document.createElement('canvas'); cvs.width = 256; cvs.height = 96;
+    const ctx = cvs.getContext('2d');
+    // Measure text
+    ctx.font = 'bold 18px Arial, sans-serif';
+    const maxW = 220, lineH = 22;
+    const words = message;
+    let line = ''; const lines = [];
+    for (const ch of words) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxW && line.length > 0) { lines.push(line); line = ch; }
+      else line = test;
+    }
+    if (line) lines.push(line);
+    const totalH = lines.length * lineH + 16;
+    cvs.height = totalH + 20; // +triangle
+    // Background bubble rect
+    const rx = 10, ry = 6, rw = cvs.width - 20, rh = totalH;
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.beginPath();
+    ctx.moveTo(rx + 12, ry); ctx.lineTo(rx + rw - 12, ry);
+    ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + 12);
+    ctx.lineTo(rx + rw, ry + rh - 12);
+    ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - 12, ry + rh);
+    ctx.lineTo(cvs.width / 2 + 10, ry + rh);
+    ctx.lineTo(cvs.width / 2, ry + rh + 14);
+    ctx.lineTo(cvs.width / 2 - 10, ry + rh);
+    ctx.lineTo(rx + 12, ry + rh);
+    ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - 12);
+    ctx.lineTo(rx, ry + 12);
+    ctx.quadraticCurveTo(rx, ry, rx + 12, ry);
+    ctx.fill();
+    // Text
+    ctx.fillStyle = '#333';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], cvs.width / 2, 10 + i * lineH);
+    }
+    const tex = new THREE.CanvasTexture(cvs); tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 1, depthTest: false, depthWrite: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(2.8, (totalH + 20) / 256 * 2.8, 1);
+    sprite.position.set(0, JUMPER.height + 1.5, 0);
+    remote.mesh.add(sprite);
+    remote._bubble = sprite;
+    remote._bubbleBorn = Date.now();
+  }
+
+  tickChatBubbles() {
+    const now = Date.now();
+    for (const remote of this.remotes.values()) {
+      const b = remote._bubble;
+      if (!b) continue;
+      const age = (now - remote._bubbleBorn) / 1000;
+      if (age > 5) {
+        const fade = Math.max(0, 1 - (age - 5) / 1);
+        b.material.opacity = fade;
+        if (fade <= 0) {
+          remote.mesh.remove(b);
+          b.material.map?.dispose();
+          b.material.dispose();
+          remote._bubble = null;
+        }
+      }
+    }
+  }
 }

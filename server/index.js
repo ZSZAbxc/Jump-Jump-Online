@@ -82,7 +82,7 @@ function generateCubes(seed, count) {
 function createRoom() {
   const roomId = Math.random().toString(36).slice(2, 8).toUpperCase();
   rooms.set(roomId, { id: roomId, players: new Map(), hostId: null, seed: Date.now() % 100000,
-    started: false, mode: 'race', modeParam: 100, randomFaces: false, faceAssignments: null, playerFaces: null });
+    started: false, mode: 'race', modeParam: 100, randomFaces: false, faceAssignments: null, playerFaces: null, chatHistory: [] });
   return roomId;
 }
 
@@ -269,6 +269,18 @@ io.on('connection', (socket) => {
       scores: [...room.players.entries()].map(([id, pl]) => ({ id, name: pl.name, score: pl.score, idx: pl.idx })) });
     for (const [id, pl] of room.players) { pl.ready = (id === room.hostId); pl.alive = true; pl.score = 0; pl.idx = 0; pl.finished = false; }
     broadcastRoom(room);
+  });
+
+  });
+
+  // ── Chat ────────────────────────────────────────────────────────
+  socket.on('chat_message', ({ message }) => {
+    const room = rooms.get(myRoom); if (!room) return;
+    const p = room.players.get(socket.id);
+    const ent = { socketId: socket.id, name: p?.name || '玩家', color: p?.color || '#232323', message, time: Date.now() };
+    room.chatHistory.push(ent);
+    if (room.chatHistory.length > 50) room.chatHistory.shift();
+    io.to(myRoom).emit('chat_message', ent);
   });
 
   // ── End-game vote ─────────────────────────────────────────────

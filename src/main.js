@@ -59,6 +59,7 @@ network.onError = (msg) => alert(msg);
 
 network.onGameStart = ({ cubes, dirs, mode, modeParam, faceAssignments, playerFaces, serverTime }) => {
   ui.hideWaitingScreen();
+  ui.showChatInput(true);
   world.loadSharedCubes(cubes, dirs, mode, modeParam, faceAssignments, playerFaces);
   game.setMode(mode, modeParam);
   game.setServerTime(serverTime);
@@ -96,6 +97,12 @@ network.onRemoteState = (state) => {
 
   audioManager.setRemoteIdx(state.socketId, state.idx ?? 0);
   game.applyRemoteState(state.socketId, state);
+};
+
+network.onChatMessage = (data) => {
+  ui.addChatMessage(data);
+  // In-game bubble: only during active game
+  if (world.jumper) world.showChatBubble(data.socketId, data.message);
 };
 
 network.onGameOver = ({ winner, winnerName, reason, scores }) => {
@@ -216,6 +223,11 @@ ui.onModeChange((modeConfig) => {
 // Host random-faces toggle
 ui.onRandomFacesToggle(() => {
   network.toggleRandomFaces();
+});
+
+// Chat send callback
+ui.onChatSend((message) => {
+  network.sendChat(message);
 });
 
 // ── Flow ────────────────────────────────────────────────────────────

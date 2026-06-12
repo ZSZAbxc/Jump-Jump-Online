@@ -677,6 +677,7 @@ export class UI {
   showUploadDialog() {
     return new Promise((resolve) => {
       this._uploadContainer.style.display = 'flex';
+      this.showChatInput(false);
       const finish = (texture, texDataURL, chargeAudioURL, jumpAudioURL) => {
         this._uploadContainer.style.display = 'none';
         resolve({ name: this._nameInput.value.trim() || '玩家', texture, color: this._colorInput.value, texDataURL, chargeAudioURL, jumpAudioURL });
@@ -900,6 +901,7 @@ export class UI {
     return new Promise((resolve) => {
       if (!this._roomScreen) this._createRoomScreen();
       this._roomScreen.style.display = 'flex';
+      this.showChatInput(false);
       const finish = (action, data) => {
         this._roomScreen.style.display = 'none';
         resolve({ action, data });
@@ -915,6 +917,7 @@ export class UI {
   showWaitingScreen(roomId, amHost, modeConfig) {
     if (!this._waitingScreen) this._createWaitingScreen();
     this._waitingScreen.style.display = 'flex';
+    this.showChatInput(true);
     this._roomCodeLabel.textContent = `房间号: ${roomId}`;
     this._copyBtn.onclick = () => {
       navigator.clipboard.writeText(roomId).then(() => {
@@ -1101,5 +1104,147 @@ export class UI {
     if (this._randomFacesReadonly) {
       this._randomFacesReadonly.textContent = modeConfig.randomFaces ? '🎲 随机地块已启用' : '';
     }
+  }
+
+  /* ================================================================
+   *  CHAT
+   * ================================================================ */
+
+  _createChat() {
+    if (this._chatContainer) return;
+    const c = document.createElement('div');
+    c.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;pointer-events:none;z-index:200;';
+
+    // -- Input bar --
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 16px 12px;' +
+      'background:linear-gradient(transparent, rgba(0,0,0,0.6));pointer-events:auto;';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 80;
+    input.placeholder = '输入消息...';
+    input.style.cssText = 'width:220px;max-width:60vw;padding:6px 10px;border-radius:16px;border:1px solid rgba(255,255,255,0.25);' +
+      'background:rgba(0,0,0,0.45);color:#fff;font-size:13px;outline:none;';
+    const emojiBtn = document.createElement('button');
+    emojiBtn.textContent = '😄';
+    emojiBtn.style.cssText = 'background:transparent;border:none;font-size:20px;cursor:pointer;padding:2px;';
+    const sendBtn = document.createElement('button');
+    sendBtn.textContent = '发送';
+    sendBtn.style.cssText = 'background:rgba(255,255,255,0.2);color:#fff;border:none;border-radius:16px;' +
+      'padding:6px 14px;font-size:13px;cursor:pointer;';
+
+    // -- Emoji picker --
+    const picker = document.createElement('div');
+    picker.style.cssText = 'display:none;position:fixed;bottom:52px;left:50%;transform:translateX(-50%);' +
+      'background:rgba(30,30,30,0.95);border-radius:12px;padding:8px;grid-template-columns:repeat(8,32px);gap:4px;' +
+      'z-index:201;max-width:90vw;overflow-y:auto;max-height:200px;pointer-events:auto;';
+    const emojis = '😀😃😄😁😅😂🤣😊😇🙂😉😌😍🥰😘😗😙😚😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😏😒🙄😬🤥😌😔😪🤤😴😷🤒🤕🤢🤮🤧🥵🥶😵🤯🤠🥳🥸😎🤓🧐😕😟🙁😮😯😲😳🥺😢😭😤😡🤬💀☠️💩🤡👹👺👻👽🤖😺😸😹😻😼😽🙀😿😾❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝👍👎👏🙌🤝💪🦾🦿🦶👂🦻👃🧠🫀🫁🦷🦴👀👁👅👄';
+    picker.style.display = 'none';
+    for (const ch of emojis) {
+      const btn = document.createElement('span');
+      btn.textContent = ch;
+      btn.style.cssText = 'font-size:20px;text-align:center;cursor:pointer;padding:2px;border-radius:4px;';
+      btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255,255,255,0.2)'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const start = input.selectionStart ?? input.value.length;
+        input.value = input.value.slice(0, start) + ch + input.value.slice(start);
+        input.focus();
+        picker.style.display = 'none';
+      });
+      picker.appendChild(btn);
+    }
+    document.addEventListener('click', (e) => {
+      if (!picker.contains(e.target) && e.target !== emojiBtn) picker.style.display = 'none';
+    });
+
+    emojiBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      picker.style.display = picker.style.display === 'grid' ? 'none' : 'grid';
+    });
+
+    const send = () => {
+      const msg = input.value.trim();
+      if (!msg) return;
+      if (this._chatSendCb) this._chatSendCb(msg);
+      input.value = '';
+    };
+    sendBtn.addEventListener('click', send);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+
+    bar.appendChild(input);
+    bar.appendChild(emojiBtn);
+    bar.appendChild(sendBtn);
+
+    // -- Chat log (bottom-left) --
+    const log = document.createElement('div');
+    log.style.cssText = 'position:fixed;left:12px;bottom:60px;max-width:320px;display:flex;flex-direction:column;gap:4px;' +
+      'pointer-events:none;z-index:199;';
+    log.id = 'chat-log';
+
+    c.appendChild(log);
+    c.appendChild(bar);
+    c.appendChild(picker);
+    document.body.appendChild(c);
+
+    this._chatContainer = c;
+    this._chatInput = input;
+    this._chatLog = log;
+    this._chatPicker = picker;
+    this._chatFadeTimer = null;
+    this._chatMessages = []; // { el, expires }
+  }
+
+  showChatInput(visible) {
+    if (!this._chatContainer) this._createChat();
+    this._chatContainer.style.display = visible ? 'block' : 'none';
+  }
+
+  onChatSend(cb) { this._chatSendCb = cb; }
+
+  addChatMessage(data) {
+    if (!this._chatContainer) this._createChat();
+
+    // Create row: color dot + name: message
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:6px;color:#fff;font-size:12px;' +
+      'background:rgba(0,0,0,0.55);border-radius:8px;padding:4px 8px;transition:opacity 0.4s;opacity:1;';
+    const dot = document.createElement('span');
+    dot.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${data.color || '#fff'};margin-top:4px;flex-shrink:0;`;
+    const text = document.createElement('span');
+    text.textContent = `${data.name}: ${data.message}`;
+    row.appendChild(dot);
+    row.appendChild(text);
+    this._chatLog.appendChild(row);
+
+    const entry = { el: row, expires: Date.now() + 10000 };
+    this._chatMessages.push(entry);
+
+    // Reset fade timer for all messages
+    this._resetChatFade();
+  }
+
+  _resetChatFade() {
+    if (this._chatFadeTimer) clearTimeout(this._chatFadeTimer);
+    // Ensure all messages are fully visible
+    for (const e of this._chatMessages) {
+      e.el.style.opacity = '1';
+      e.expires = Date.now() + 10000;
+    }
+    // Set timer to start fade after 10s
+    this._chatFadeTimer = setTimeout(() => this._fadeChatOut(), 10000);
+  }
+
+  _fadeChatOut() {
+    this._chatFadeTimer = setTimeout(() => {
+      // Remove all messages after fade completes
+      for (const e of this._chatMessages) {
+        if (e.el.parentNode) e.el.remove();
+      }
+      this._chatMessages.length = 0;
+    }, 2000);
+    // Start fade
+    for (const e of this._chatMessages) e.el.style.opacity = '0';
   }
 }
