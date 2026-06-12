@@ -336,7 +336,6 @@ export class Game {
   }
 
   applyRemoteState(id, state) {
-    if (this._dead || this._finished) return;
     this.world.addOrUpdateRemote(id, parseInt(state.color.replace('#', ''), 16), state.texData, state.name);
     this.world.updateRemoteState(id, state);
     // Event-based jump: start local simulation when remote player begins jumping
