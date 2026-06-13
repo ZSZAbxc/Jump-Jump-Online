@@ -502,6 +502,8 @@ export class Game {
   _startFall() {
     // Broadcast fall to other players before marking dead (syncState skips dead)
     const j = this.world.jumper;
+    // Lock respawn to the cube we took off from
+    this._respawnIdx = this.world.currentIdx;
     this.network?.sendState({
       state: 'falling',
       pos: { x: j.position.x, y: j.position.y, z: j.position.z },
